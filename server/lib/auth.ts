@@ -38,11 +38,14 @@ export async function verifySessionToken(token: string): Promise<{ userId: numbe
   }
 }
 
+// Frontend and API are served from the same origin, so "lax" is sufficient and — unlike
+// "none" — doesn't require the Secure attribute, which browsers refuse to honor over
+// plain http (i.e. local dev without TLS).
 export function setSessionCookie(res: Response, token: string) {
   res.cookie(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
+    sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     maxAge: 30 * 24 * 60 * 60 * 1000,
   });
@@ -52,7 +55,7 @@ export function clearSessionCookie(res: Response) {
   res.clearCookie(SESSION_COOKIE_NAME, {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
+    sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
   });
 }
