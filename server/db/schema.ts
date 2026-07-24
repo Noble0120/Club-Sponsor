@@ -3,6 +3,7 @@ import {
   int,
   varchar,
   text,
+  longtext,
   boolean,
   timestamp,
   mysqlEnum,
@@ -100,6 +101,20 @@ export const benefitItems = mysqlTable("benefit_items", {
   contractNote: text("contract_note"),
   sortOrder: int("sort_order").notNull().default(0),
   isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Stores the club's sponsor contract documents (PDFs) as a permanent repository, separate
+// from the transient AI extraction flow that reads them to auto-populate benefit_items.
+export const sponsorContracts = mysqlTable("sponsor_contracts", {
+  id: int("id").autoincrement().primaryKey(),
+  sponsorId: int("sponsor_id").notNull(),
+  url: text("url").notNull(),
+  fileKey: varchar("file_key", { length: 500 }).notNull(),
+  filename: varchar("filename", { length: 255 }),
+  mimeType: varchar("mime_type", { length: 100 }),
+  extractedText: longtext("extracted_text"),
+  uploadedBy: int("uploaded_by").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -270,6 +285,7 @@ export type Club = typeof clubs.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Match = typeof matches.$inferSelect;
 export type Sponsor = typeof sponsors.$inferSelect;
+export type SponsorContract = typeof sponsorContracts.$inferSelect;
 export type BenefitItem = typeof benefitItems.$inferSelect;
 export type AcceptanceRecord = typeof acceptanceRecords.$inferSelect;
 export type BenefitCheckItem = typeof benefitCheckItems.$inferSelect;

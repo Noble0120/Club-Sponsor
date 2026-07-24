@@ -8,12 +8,96 @@ import {
   benefitCheckItems,
   acceptanceRecords,
   sponsors,
+  sponsorContracts,
   matches,
   fulfillmentModeEnum,
 } from "../../db/schema";
 import { computeBenefitItemProgress } from "../../lib/benefitProgress";
+import { invokeLLM } from "../../lib/llm";
 
 const fulfillmentModeSchema = z.enum(fulfillmentModeEnum);
+
+const MAX_CONTRACT_TEXT_LENGTH = 24000;
+
+const extractedItemSchema = z.object({
+  name: z.string().min(1),
+  category: z.string().nullable().optional(),
+  fulfillmentMode: fulfillmentModeSchema,
+  targetCount: z.number().nullable().optional(),
+  countUnit: z.string().nullable().optional(),
+  startDate: z.string().nullable().optional(),
+  endDate: z.string().nullable().optional(),
+  scope: z.string().nullable().optional(),
+  attachmentRequirement: z.string().nullable().optional(),
+  requiresApproval: z.boolean().nullable().optional(),
+  contractNote: z.string().nullable().optional(),
+});
+
+function buildExtractionPrompt(
+  sponsorName: string,
+  contractText: string,
+  hints: { name: string; category?: string }[],
+) {
+  const truncated =
+    contractText.length > MAX_CONTRACT_TEXT_LENGTH
+      ? `${contractText.slice(0, MAX_CONTRACT_TEXT_LENGTH)}\n...(内容过长，已截断)`
+      : contractText;
+
+  const hintsSection =
+    hints.length > 0
+      ? `## 已知权益名称清单（来自Excel，可能不完整或不够准确，请结合合同原文校对、修正、补充）\n${hints
+          .map((h) => `- ${h.name}${h.category ? `（${h.category}）` : ""}`)
+          .join("\n")}\n`
+      : "";
+
+  return `你是一名专业的体育赞助合同分析师。请仔细阅读以下赞助合同原文，为赞助商"${sponsorName}"提取出所有权益条款，拆分成结构化的权益条目列表。
+
+${hintsSection}## 合同原文
+${truncated}
+
+请提取合同中约定的每一项赞助权益，判断其履约验收方式，归类为以下6种履约模式之一：
+- QUANTITY：全季累计完成一定数量（如制作N条视频、投放N次广告）
+- MATCH：需要逐场比赛单独验收（如每场主场比赛都要展示）
+- ROUND：按联赛轮次逐轮验收
+- EVENT：全季累计完成一定次数的活动（如举办N次球迷活动）
+- ONE_TIME：只需完成一次即可（如授权书签署、形象使用许可）
+- CONTINUOUS：需要在某个时间段内持续满足（如广告牌常年展示）
+
+只返回一个 JSON 数组，不要包含任何其他文字、说明或 Markdown 代码块标记。数组中每个对象包含以下字段：
+{
+  "name": "权益名称",
+  "category": "权益分类，如媒体曝光、票务接待等，没有明确分类则留空字符串",
+  "fulfillmentMode": "QUANTITY|MATCH|ROUND|EVENT|ONE_TIME|CONTINUOUS 之一",
+  "targetCount": 数字或 null,
+  "countUnit": "单位，如条/场/次，没有则为 null",
+  "startDate": "YYYY-MM-DD 或 null",
+  "endDate": "YYYY-MM-DD 或 null",
+  "scope": "适用范围说明，没有明确写出可留空字符串",
+  "attachmentRequirement": "验收所需附件要求说明，没有则留空字符串",
+  "requiresApproval": true 或 false（涉及金额较大或需要专人审核的建议为 true）,
+  "contractNote": "对应的合同原文摘录，方便人工核对"
+}`;
+}
+
+function parseExtractionResponse(raw: string) {
+  const cleaned = raw
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AI 返回内容无法解析，请重试" });
+  }
+
+  const result = z.array(extractedItemSchema).safeParse(parsed);
+  if (!result.success) {
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AI 返回格式不符合预期，请重试" });
+  }
+  return result.data;
+}
 
 async function assertSponsorInClub(sponsorId: number, clubId: number) {
   const [sponsor] = await db
@@ -164,13 +248,15 @@ export const benefitsRouter = router({
       return progress;
     }),
 
-  // Rows already parsed client-side from the uploaded spreadsheet. Sponsors are matched by
-  // name (case-insensitive) within the club and auto-created if no match exists.
+  // Rows already parsed/extracted client-side (from a spreadsheet, or reviewed AI output from
+  // extractFromContract). Sponsors are matched by name (case-insensitive) within the club and
+  // auto-created if no match exists.
   importList: adminProcedure
     .input(
       z.array(
         z.object({
           sponsorName: z.string().min(1),
+          code: z.string().optional(),
           name: z.string().min(1),
           category: z.string().optional(),
           fulfillmentMode: fulfillmentModeSchema,
@@ -178,6 +264,10 @@ export const benefitsRouter = router({
           countUnit: z.string().optional(),
           startDate: z.coerce.date().optional(),
           endDate: z.coerce.date().optional(),
+          scope: z.string().optional(),
+          attachmentRequirement: z.string().optional(),
+          requiresApproval: z.boolean().optional(),
+          contractNote: z.string().optional(),
         }),
       ),
     )
@@ -205,6 +295,7 @@ export const benefitsRouter = router({
 
         await db.insert(benefitItems).values({
           sponsorId: sponsor.id,
+          code: row.code,
           name: row.name,
           category: row.category || "",
           fulfillmentMode: row.fulfillmentMode,
@@ -212,11 +303,47 @@ export const benefitsRouter = router({
           countUnit: row.countUnit,
           startDate: row.startDate,
           endDate: row.endDate,
+          scope: row.scope,
+          attachmentRequirement: row.attachmentRequirement,
+          requiresApproval: row.requiresApproval,
+          contractNote: row.contractNote,
         });
         created += 1;
       }
 
       return { created, sponsorsCreated };
+    }),
+
+  // Reads a previously-uploaded contract's cached extracted text, cross-references it against
+  // any hints parsed from an Excel sheet, and asks the LLM to produce a structured, reviewable
+  // list of benefit items. Nothing is written to the database here — the admin reviews the
+  // result and confirms via importList.
+  extractFromContract: adminProcedure
+    .input(
+      z.object({
+        sponsorId: z.number(),
+        contractId: z.number(),
+        hints: z.array(z.object({ name: z.string(), category: z.string().optional() })).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const sponsor = await assertSponsorInClub(input.sponsorId, ctx.user.clubId!);
+
+      const [contract] = await db
+        .select()
+        .from(sponsorContracts)
+        .where(eq(sponsorContracts.id, input.contractId))
+        .limit(1);
+      if (!contract || contract.sponsorId !== input.sponsorId) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "合同不存在" });
+      }
+      if (!contract.extractedText) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "该合同未能提取出文本内容，请确认是文字版 PDF" });
+      }
+
+      const prompt = buildExtractionPrompt(sponsor.name, contract.extractedText, input.hints ?? []);
+      const raw = await invokeLLM(prompt);
+      return parseExtractionResponse(raw);
     }),
 
   pendingReviews: adminProcedure.query(async ({ ctx }) => {

@@ -1,8 +1,19 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, Plus, Pencil, Trash2, FileSpreadsheet } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  Pencil,
+  Trash2,
+  Sparkles,
+  FileText,
+  Upload,
+  Loader2,
+} from "lucide-react";
 import { trpc } from "@/lib/trpc";
-import { parseSpreadsheet, excelCell, excelNumber, excelDate } from "@/lib/excel";
+import { fileToBase64 } from "@/lib/upload";
+import { parseSpreadsheet, excelCell } from "@/lib/excel";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,7 +40,6 @@ export default function SponsorsAdmin() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   type SponsorRow = NonNullable<typeof sponsors>[number];
   const [dialogSponsor, setDialogSponsor] = useState<SponsorRow | "new" | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
 
   const deleteSponsor = trpc.sponsors.delete.useMutation({
     onSuccess: () => {
@@ -45,16 +55,10 @@ export default function SponsorsAdmin() {
           <h1 className="text-2xl font-semibold">赞助商管理</h1>
           <p className="text-sm text-muted-foreground">管理赞助商基本信息与权益条目</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setImportOpen(true)}>
-            <FileSpreadsheet className="mr-1 h-4 w-4" />
-            导入权益 Excel
-          </Button>
-          <Button onClick={() => setDialogSponsor("new")}>
-            <Plus className="mr-1 h-4 w-4" />
-            新增赞助商
-          </Button>
-        </div>
+        <Button onClick={() => setDialogSponsor("new")}>
+          <Plus className="mr-1 h-4 w-4" />
+          新增赞助商
+        </Button>
       </div>
 
       <div className="space-y-3">
@@ -96,8 +100,9 @@ export default function SponsorsAdmin() {
               </Button>
             </button>
             {expandedId === sponsor.id && (
-              <CardContent className="border-t pt-4">
-                <BenefitItemsManager sponsorId={sponsor.id} />
+              <CardContent className="space-y-6 border-t pt-4">
+                <ContractsManager sponsorId={sponsor.id} />
+                <BenefitItemsManager sponsorId={sponsor.id} sponsorName={sponsor.name} />
               </CardContent>
             )}
           </Card>
@@ -109,15 +114,6 @@ export default function SponsorsAdmin() {
         onClose={() => setDialogSponsor(null)}
         onSaved={() => {
           setDialogSponsor(null);
-          utils.sponsors.list.invalidate();
-        }}
-      />
-
-      <BenefitImportDialog
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
-        onImported={() => {
-          setImportOpen(false);
           utils.sponsors.list.invalidate();
         }}
       />
@@ -216,12 +212,70 @@ function SponsorDialog({
   );
 }
 
-function BenefitItemsManager({ sponsorId }: { sponsorId: number }) {
+function ContractsManager({ sponsorId }: { sponsorId: number }) {
+  const utils = trpc.useUtils();
+  const { data: contracts } = trpc.contracts.bySponsor.useQuery({ sponsorId });
+  const uploadMutation = trpc.contracts.upload.useMutation({
+    onSuccess: () => {
+      toast.success("合同已上传");
+      utils.contracts.bySponsor.invalidate({ sponsorId });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const deleteMutation = trpc.contracts.delete.useMutation({
+    onSuccess: () => {
+      toast.success("已删除");
+      utils.contracts.bySponsor.invalidate({ sponsorId });
+    },
+  });
+
+  async function handleUpload(file: File | undefined) {
+    if (!file) return;
+    const base64 = await fileToBase64(file);
+    await uploadMutation.mutateAsync({ sponsorId, base64, mimeType: file.type, filename: file.name });
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium">合同文件</h3>
+        <label className="flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent">
+          {uploadMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+          上传合同（PDF）
+          <input
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={(e) => handleUpload(e.target.files?.[0])}
+          />
+        </label>
+      </div>
+      <div className="space-y-2">
+        {contracts?.map((c) => (
+          <div key={c.id} className="flex items-center gap-2 rounded-md border p-2 text-sm">
+            <FileText className="h-4 w-4 text-muted-foreground" />
+            <a href={c.url} target="_blank" rel="noreferrer" className="flex-1 truncate text-primary underline">
+              {c.filename || "合同文件"}
+            </a>
+            <span className="text-xs text-muted-foreground">{new Date(c.createdAt).toLocaleDateString()}</span>
+            <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate({ id: c.id })}>
+              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+            </Button>
+          </div>
+        ))}
+        {contracts?.length === 0 && <p className="text-sm text-muted-foreground">暂无合同文件</p>}
+      </div>
+    </div>
+  );
+}
+
+function BenefitItemsManager({ sponsorId, sponsorName }: { sponsorId: number; sponsorName: string }) {
   const utils = trpc.useUtils();
   const { data: items } = trpc.benefits.bySponsor.useQuery({ sponsorId });
   const { data: users } = trpc.userManagement.list.useQuery();
   type BenefitItemRow = NonNullable<typeof items>[number];
   const [dialogItem, setDialogItem] = useState<BenefitItemRow | "new" | null>(null);
+  const [aiImportOpen, setAiImportOpen] = useState(false);
   const deleteItem = trpc.benefits.delete.useMutation({
     onSuccess: () => {
       toast.success("已删除");
@@ -233,10 +287,16 @@ function BenefitItemsManager({ sponsorId }: { sponsorId: number }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium">权益条目</h3>
-        <Button size="sm" onClick={() => setDialogItem("new")}>
-          <Plus className="mr-1 h-3 w-3" />
-          新增权益条目
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => setAiImportOpen(true)}>
+            <Sparkles className="mr-1 h-3 w-3" />
+            合同+Excel智能导入
+          </Button>
+          <Button size="sm" onClick={() => setDialogItem("new")}>
+            <Plus className="mr-1 h-3 w-3" />
+            新增权益条目
+          </Button>
+        </div>
       </div>
       <div className="space-y-2">
         {items?.map((item) => {
@@ -276,6 +336,17 @@ function BenefitItemsManager({ sponsorId }: { sponsorId: number }) {
         onClose={() => setDialogItem(null)}
         onSaved={() => {
           setDialogItem(null);
+          utils.benefits.bySponsor.invalidate({ sponsorId });
+        }}
+      />
+
+      <AIImportDialog
+        sponsorId={sponsorId}
+        sponsorName={sponsorName}
+        open={aiImportOpen}
+        onClose={() => setAiImportOpen(false)}
+        onImported={() => {
+          setAiImportOpen(false);
           utils.benefits.bySponsor.invalidate({ sponsorId });
         }}
       />
@@ -502,104 +573,218 @@ function BenefitItemDialog({
   );
 }
 
-interface ParsedBenefitRow {
-  sponsorName: string;
+interface ExcelHint {
   name: string;
   category?: string;
-  fulfillmentMode: FulfillmentMode;
-  targetCount?: number;
-  countUnit?: string;
-  startDate?: Date;
-  endDate?: Date;
 }
 
-const VALID_MODES = new Set(["QUANTITY", "MATCH", "ROUND", "EVENT", "ONE_TIME", "CONTINUOUS"]);
+interface ExtractedRow {
+  name: string;
+  category?: string | null;
+  fulfillmentMode: FulfillmentMode;
+  targetCount?: number | null;
+  countUnit?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  scope?: string | null;
+  attachmentRequirement?: string | null;
+  requiresApproval?: boolean | null;
+  contractNote?: string | null;
+}
 
-function BenefitImportDialog({
+function AIImportDialog({
+  sponsorId,
+  sponsorName,
   open,
   onClose,
   onImported,
 }: {
+  sponsorId: number;
+  sponsorName: string;
   open: boolean;
   onClose: () => void;
   onImported: () => void;
 }) {
-  const [rows, setRows] = useState<ParsedBenefitRow[]>([]);
+  const { data: contracts } = trpc.contracts.bySponsor.useQuery({ sponsorId }, { enabled: open });
+  const [contractId, setContractId] = useState("");
+  const [excelName, setExcelName] = useState("");
+  const [hints, setHints] = useState<ExcelHint[]>([]);
+  const [rows, setRows] = useState<ExtractedRow[]>([]);
   const [error, setError] = useState("");
+
+  const extractMutation = trpc.benefits.extractFromContract.useMutation({
+    onSuccess: (result) => {
+      setRows(result);
+      if (result.length === 0) setError("AI 未能从合同中识别出权益条款，请检查合同内容或换一份文件重试");
+    },
+    onError: (e) => {
+      setError(e.message);
+    },
+  });
 
   const importMutation = trpc.benefits.importList.useMutation({
     onSuccess: (result) => {
-      toast.success(
-        `导入成功：新增 ${result.created} 条权益条目${result.sponsorsCreated.length > 0 ? `，自动创建赞助商：${result.sponsorsCreated.join("、")}` : ""}`,
-      );
+      toast.success(`导入成功：新增 ${result.created} 条权益条目`);
       setRows([]);
+      setHints([]);
+      setExcelName("");
       onImported();
     },
     onError: (e) => toast.error(e.message),
   });
 
-  async function handleFile(file: File | undefined) {
+  async function handleExcel(file: File | undefined) {
     if (!file) return;
     setError("");
     try {
       const parsed = await parseSpreadsheet(file);
-      const result: ParsedBenefitRow[] = [];
+      const result: ExcelHint[] = [];
       for (const row of parsed) {
-        const sponsorName = excelCell(row, "赞助商", "合作方", "sponsorName");
         const name = excelCell(row, "权益名称", "名称", "name");
-        const modeRaw = excelCell(row, "履约模式", "fulfillmentMode")?.toUpperCase();
-        if (!sponsorName || !name || !modeRaw || !VALID_MODES.has(modeRaw)) continue;
-        result.push({
-          sponsorName,
-          name,
-          category: excelCell(row, "权益分类", "分类", "category"),
-          fulfillmentMode: modeRaw as FulfillmentMode,
-          targetCount: excelNumber(row, "目标数量", "targetCount"),
-          countUnit: excelCell(row, "单位", "countUnit"),
-          startDate: excelDate(row, "开始日期", "startDate"),
-          endDate: excelDate(row, "结束日期", "endDate"),
-        });
+        if (!name) continue;
+        result.push({ name, category: excelCell(row, "权益分类", "分类", "category") });
       }
-      if (result.length === 0) {
-        setError("没有解析到有效行，请确认表头包含：赞助商、权益名称、履约模式");
-      }
-      setRows(result);
+      setHints(result);
+      setExcelName(file.name);
     } catch {
-      setError("文件解析失败，请确认是 .xlsx/.csv 格式");
+      setError("Excel 解析失败，请确认是 .xlsx/.csv 格式");
     }
   }
 
+  function handleExtract() {
+    setError("");
+    if (!contractId) {
+      setError("请先选择一份合同");
+      return;
+    }
+    extractMutation.mutate({ sponsorId, contractId: Number(contractId), hints });
+  }
+
+  function handleImport() {
+    importMutation.mutate(
+      rows.map((row) => ({
+        sponsorName,
+        name: row.name,
+        category: row.category || undefined,
+        fulfillmentMode: row.fulfillmentMode,
+        targetCount: row.targetCount ?? undefined,
+        countUnit: row.countUnit || undefined,
+        startDate: row.startDate ? new Date(row.startDate) : undefined,
+        endDate: row.endDate ? new Date(row.endDate) : undefined,
+        scope: row.scope || undefined,
+        attachmentRequirement: row.attachmentRequirement || undefined,
+        requiresApproval: row.requiresApproval ?? undefined,
+        contractNote: row.contractNote || undefined,
+      })),
+    );
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-2xl">
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) {
+          setRows([]);
+          setError("");
+          onClose();
+        }
+      }}
+    >
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>导入权益列表 Excel</DialogTitle>
+          <DialogTitle>合同 + Excel 智能导入权益</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            表头需要包含：赞助商、权益名称、履约模式（QUANTITY/MATCH/ROUND/EVENT/ONE_TIME/CONTINUOUS），可选：权益分类、目标数量、单位、开始日期、结束日期。赞助商名称不存在时会自动新建。
+            选择一份已上传的合同（在上方"合同文件"中先上传），AI 会读取合同原文自动拆解出权益条款；如果还有 Excel
+            权益清单，可以一并上传作为参考，AI 会结合两者互相校对、补全信息。
           </p>
-          <Input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleFile(e.target.files?.[0])} />
+          <div className="space-y-1.5">
+            <Label>选择合同</Label>
+            <Select value={contractId} onValueChange={setContractId}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择合同文件" />
+              </SelectTrigger>
+              <SelectContent>
+                {contracts?.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.filename || `合同 #${c.id}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {contracts?.length === 0 && (
+              <p className="text-xs text-muted-foreground">该赞助商暂无合同，请先在上方上传</p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label>Excel 权益清单（可选，作为辅助参考）</Label>
+            <Input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleExcel(e.target.files?.[0])} />
+            {excelName && (
+              <p className="text-xs text-muted-foreground">
+                已加载 {excelName}，解析到 {hints.length} 条权益名称
+              </p>
+            )}
+          </div>
+
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={handleExtract}
+            disabled={extractMutation.isPending || !contractId}
+          >
+            {extractMutation.isPending ? (
+              <>
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                AI 识别中（可能需要 10-30 秒）...
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-1 h-4 w-4" />
+                开始智能识别
+              </>
+            )}
+          </Button>
+
           {error && <p className="text-sm text-destructive">{error}</p>}
+
           {rows.length > 0 && (
-            <div className="max-h-64 overflow-y-auto rounded-md border">
+            <div className="max-h-72 overflow-y-auto rounded-md border">
               <table className="w-full text-xs">
                 <thead className="bg-muted/40 text-left">
                   <tr>
-                    <th className="px-2 py-1">赞助商</th>
                     <th className="px-2 py-1">权益名称</th>
+                    <th className="px-2 py-1">分类</th>
                     <th className="px-2 py-1">模式</th>
                     <th className="px-2 py-1">目标</th>
+                    <th className="px-2 py-1">审核</th>
+                    <th className="px-2 py-1"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row, idx) => (
-                    <tr key={idx} className="border-t">
-                      <td className="px-2 py-1">{row.sponsorName}</td>
-                      <td className="px-2 py-1">{row.name}</td>
+                    <tr key={idx} className="border-t align-top">
+                      <td className="px-2 py-1">
+                        <div className="font-medium">{row.name}</div>
+                        {row.contractNote && (
+                          <div className="mt-0.5 max-w-xs truncate text-muted-foreground" title={row.contractNote}>
+                            {row.contractNote}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-2 py-1">{row.category || "-"}</td>
                       <td className="px-2 py-1">{FULFILLMENT_MODE_LABELS[row.fulfillmentMode]}</td>
                       <td className="px-2 py-1">
                         {row.targetCount != null ? `${row.targetCount}${row.countUnit ?? ""}` : "-"}
+                      </td>
+                      <td className="px-2 py-1">{row.requiresApproval ? "需审核" : "-"}</td>
+                      <td className="px-2 py-1">
+                        <button
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => setRows((prev) => prev.filter((_, i) => i !== idx))}
+                        >
+                          移除
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -612,11 +797,8 @@ function BenefitImportDialog({
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button
-            onClick={() => importMutation.mutate(rows)}
-            disabled={rows.length === 0 || importMutation.isPending}
-          >
-            {importMutation.isPending ? "导入中..." : `导入 ${rows.length} 条`}
+          <Button onClick={handleImport} disabled={rows.length === 0 || importMutation.isPending}>
+            {importMutation.isPending ? "导入中..." : `确认导入 ${rows.length} 条`}
           </Button>
         </DialogFooter>
       </DialogContent>
