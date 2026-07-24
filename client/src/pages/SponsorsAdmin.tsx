@@ -29,15 +29,27 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { colorForText, FULFILLMENT_MODE_LABELS } from "@/lib/constants";
-import type { fulfillmentModeEnum } from "@server/db/schema";
+import {
+  colorForText,
+  FULFILLMENT_MODE_LABELS,
+  SPONSOR_STAGE_LABELS,
+  SPONSOR_STAGE_COLORS,
+  ACTIVITY_TYPE_LABELS,
+} from "@/lib/constants";
+import { cn } from "@/lib/utils";
+import type { fulfillmentModeEnum, sponsorStageEnum, sponsorActivityTypeEnum } from "@server/db/schema";
 
 type FulfillmentMode = (typeof fulfillmentModeEnum)[number];
+type SponsorStage = (typeof sponsorStageEnum)[number];
+type ActivityType = (typeof sponsorActivityTypeEnum)[number];
+
+const STAGE_TABS: (SponsorStage | "all")[] = ["all", "lead", "negotiating", "signed", "lost"];
 
 export default function SponsorsAdmin() {
   const utils = trpc.useUtils();
   const { data: sponsors } = trpc.sponsors.list.useQuery();
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [stageFilter, setStageFilter] = useState<SponsorStage | "all">("all");
   type SponsorRow = NonNullable<typeof sponsors>[number];
   const [dialogSponsor, setDialogSponsor] = useState<SponsorRow | "new" | null>(null);
 
@@ -48,12 +60,14 @@ export default function SponsorsAdmin() {
     },
   });
 
+  const filteredSponsors = sponsors?.filter((s) => stageFilter === "all" || s.stage === stageFilter);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">赞助商管理</h1>
-          <p className="text-sm text-muted-foreground">管理赞助商基本信息与权益条目</p>
+          <p className="text-sm text-muted-foreground">管理商务合作全流程：从潜在客户到已签约赞助商</p>
         </div>
         <Button onClick={() => setDialogSponsor("new")}>
           <Plus className="mr-1 h-4 w-4" />
@@ -61,8 +75,23 @@ export default function SponsorsAdmin() {
         </Button>
       </div>
 
+      <div className="flex gap-2">
+        {STAGE_TABS.map((stage) => (
+          <button
+            key={stage}
+            onClick={() => setStageFilter(stage)}
+            className={cn(
+              "rounded-md border px-3 py-1.5 text-sm transition-colors",
+              stageFilter === stage ? "border-primary bg-primary text-primary-foreground" : "hover:bg-accent",
+            )}
+          >
+            {stage === "all" ? "全部" : SPONSOR_STAGE_LABELS[stage]}
+          </button>
+        ))}
+      </div>
+
       <div className="space-y-3">
-        {sponsors?.map((sponsor) => (
+        {filteredSponsors?.map((sponsor) => (
           <Card key={sponsor.id}>
             <button
               className="flex w-full items-center gap-3 p-4 text-left"
@@ -72,6 +101,7 @@ export default function SponsorsAdmin() {
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{sponsor.name}</span>
+                  <Badge className={SPONSOR_STAGE_COLORS[sponsor.stage]}>{SPONSOR_STAGE_LABELS[sponsor.stage]}</Badge>
                   <Badge className={colorForText(sponsor.tier)} variant="outline">
                     {sponsor.tier}
                   </Badge>
@@ -101,6 +131,7 @@ export default function SponsorsAdmin() {
             </button>
             {expandedId === sponsor.id && (
               <CardContent className="space-y-6 border-t pt-4">
+                <ActivitiesManager sponsorId={sponsor.id} />
                 <ContractsManager sponsorId={sponsor.id} />
                 <BenefitItemsManager sponsorId={sponsor.id} sponsorName={sponsor.name} />
               </CardContent>
@@ -126,7 +157,18 @@ function SponsorDialog({
   onClose,
   onSaved,
 }: {
-  sponsor: { id: number; name: string; tier: string; contactName: string | null; contactPhone: string | null; notes: string | null } | "new" | null;
+  sponsor:
+    | {
+        id: number;
+        name: string;
+        tier: string;
+        stage: string;
+        contactName: string | null;
+        contactPhone: string | null;
+        notes: string | null;
+      }
+    | "new"
+    | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -135,6 +177,7 @@ function SponsorDialog({
 
   const [name, setName] = useState("");
   const [tier, setTier] = useState("");
+  const [stage, setStage] = useState<SponsorStage>("lead");
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [notes, setNotes] = useState("");
@@ -145,6 +188,7 @@ function SponsorDialog({
   function reset(s: typeof existing) {
     setName(s?.name ?? "");
     setTier(s?.tier ?? "");
+    setStage((s?.stage as SponsorStage) ?? "lead");
     setContactName(s?.contactName ?? "");
     setContactPhone(s?.contactPhone ?? "");
     setNotes(s?.notes ?? "");
@@ -167,9 +211,26 @@ function SponsorDialog({
             <Label>名称</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <div className="space-y-1.5">
-            <Label>赞助层级</Label>
-            <Input value={tier} onChange={(e) => setTier(e.target.value)} placeholder="例如：冠名赞助商、官方合作伙伴" />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>阶段</Label>
+              <Select value={stage} onValueChange={(v) => setStage(v as SponsorStage)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(SPONSOR_STAGE_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>赞助层级（可选）</Label>
+              <Input value={tier} onChange={(e) => setTier(e.target.value)} placeholder="例如：冠名赞助商" />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -192,14 +253,14 @@ function SponsorDialog({
           </Button>
           <Button
             onClick={() => {
-              if (!name || !tier) {
-                toast.error("请填写名称和赞助层级");
+              if (!name) {
+                toast.error("请填写名称");
                 return;
               }
               if (isNew) {
-                create.mutate({ name, tier, contactName, contactPhone, notes });
+                create.mutate({ name, tier: tier || undefined, stage, contactName, contactPhone, notes });
               } else if (existing) {
-                update.mutate({ id: existing.id, name, tier, contactName, contactPhone, notes });
+                update.mutate({ id: existing.id, name, tier: tier || undefined, stage, contactName, contactPhone, notes });
               }
             }}
             disabled={create.isPending || update.isPending}
@@ -212,9 +273,100 @@ function SponsorDialog({
   );
 }
 
+function ActivitiesManager({ sponsorId }: { sponsorId: number }) {
+  const utils = trpc.useUtils();
+  const { data: activities } = trpc.sponsorActivities.bySponsor.useQuery({ sponsorId });
+  const [type, setType] = useState<ActivityType>("visit");
+  const [content, setContent] = useState("");
+  const [contactPerson, setContactPerson] = useState("");
+  const [followUpDate, setFollowUpDate] = useState("");
+
+  const create = trpc.sponsorActivities.create.useMutation({
+    onSuccess: () => {
+      setContent("");
+      setContactPerson("");
+      setFollowUpDate("");
+      utils.sponsorActivities.bySponsor.invalidate({ sponsorId });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const deleteMutation = trpc.sponsorActivities.delete.useMutation({
+    onSuccess: () => utils.sponsorActivities.bySponsor.invalidate({ sponsorId }),
+  });
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-sm font-medium">跟进记录</h3>
+      <div className="space-y-2">
+        {activities?.map((a) => (
+          <div key={a.id} className="flex items-start gap-2 rounded-md border p-2 text-sm">
+            <Badge variant="outline">{ACTIVITY_TYPE_LABELS[a.type]}</Badge>
+            <div className="flex-1">
+              <p>{a.content}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {new Date(a.createdAt).toLocaleString()}
+                {a.contactPerson ? ` · 联系人：${a.contactPerson}` : ""}
+                {a.followUpDate ? ` · 下次跟进：${new Date(a.followUpDate).toLocaleDateString()}` : ""}
+              </p>
+            </div>
+            <button
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => deleteMutation.mutate({ id: a.id })}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+        {activities?.length === 0 && <p className="text-sm text-muted-foreground">暂无跟进记录</p>}
+      </div>
+      <div className="space-y-2 rounded-md border p-3">
+        <div className="grid grid-cols-3 gap-2">
+          <Select value={type} onValueChange={(v) => setType(v as ActivityType)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(ACTIVITY_TYPE_LABELS).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input placeholder="联系人（可选）" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} />
+          <Input type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} title="下次跟进日期（可选）" />
+        </div>
+        <Textarea placeholder="记录本次沟通内容..." value={content} onChange={(e) => setContent(e.target.value)} />
+        <Button
+          size="sm"
+          onClick={() => {
+            if (!content) {
+              toast.error("请填写沟通内容");
+              return;
+            }
+            create.mutate({
+              sponsorId,
+              type,
+              content,
+              contactPerson: contactPerson || undefined,
+              followUpDate: followUpDate ? new Date(followUpDate) : undefined,
+            });
+          }}
+          disabled={create.isPending}
+        >
+          添加记录
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+const EXPIRING_SOON_MS = 90 * 24 * 60 * 60 * 1000;
+
 function ContractsManager({ sponsorId }: { sponsorId: number }) {
   const utils = trpc.useUtils();
   const { data: contracts } = trpc.contracts.bySponsor.useQuery({ sponsorId });
+  const [expandedContractId, setExpandedContractId] = useState<number | null>(null);
   const uploadMutation = trpc.contracts.upload.useMutation({
     onSuccess: () => {
       toast.success("合同已上传");
@@ -251,19 +403,233 @@ function ContractsManager({ sponsorId }: { sponsorId: number }) {
         </label>
       </div>
       <div className="space-y-2">
-        {contracts?.map((c) => (
-          <div key={c.id} className="flex items-center gap-2 rounded-md border p-2 text-sm">
-            <FileText className="h-4 w-4 text-muted-foreground" />
-            <a href={c.url} target="_blank" rel="noreferrer" className="flex-1 truncate text-primary underline">
-              {c.filename || "合同文件"}
-            </a>
-            <span className="text-xs text-muted-foreground">{new Date(c.createdAt).toLocaleDateString()}</span>
-            <Button size="icon" variant="ghost" onClick={() => deleteMutation.mutate({ id: c.id })}>
-              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-            </Button>
-          </div>
-        ))}
+        {contracts?.map((c) => {
+          const endDate = c.endDate ? new Date(c.endDate) : null;
+          const isExpiringSoon = endDate && endDate.getTime() - Date.now() < EXPIRING_SOON_MS && endDate.getTime() > Date.now();
+          const isExpired = endDate && endDate.getTime() < Date.now();
+          return (
+            <div key={c.id} className="rounded-md border text-sm">
+              <button
+                className="flex w-full items-center gap-2 p-2 text-left"
+                onClick={() => setExpandedContractId(expandedContractId === c.id ? null : c.id)}
+              >
+                {expandedContractId === c.id ? (
+                  <ChevronDown className="h-4 w-4 flex-shrink-0" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 flex-shrink-0" />
+                )}
+                <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                <a
+                  href={c.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex-1 truncate text-primary underline"
+                >
+                  {c.filename || "合同文件"}
+                </a>
+                {c.amount != null && <span className="text-xs text-muted-foreground">￥{c.amount.toLocaleString()}</span>}
+                {endDate && (
+                  <Badge variant={isExpired ? "secondary" : isExpiringSoon ? "destructive" : "outline"}>
+                    {isExpired ? "已到期" : isExpiringSoon ? "即将到期" : "有效期"}至 {endDate.toLocaleDateString()}
+                  </Badge>
+                )}
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteMutation.mutate({ id: c.id });
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              </button>
+              {expandedContractId === c.id && (
+                <div className="space-y-4 border-t p-3">
+                  <ContractCommercialForm contract={c} sponsorId={sponsorId} />
+                  <ContractPaymentsManager contractId={c.id} />
+                </div>
+              )}
+            </div>
+          );
+        })}
         {contracts?.length === 0 && <p className="text-sm text-muted-foreground">暂无合同文件</p>}
+      </div>
+    </div>
+  );
+}
+
+interface ContractCommercial {
+  id: number;
+  amount: number | null;
+  signedDate: string | Date | null;
+  startDate: string | Date | null;
+  endDate: string | Date | null;
+}
+
+function ContractCommercialForm({ contract, sponsorId }: { contract: ContractCommercial; sponsorId: number }) {
+  const utils = trpc.useUtils();
+  const [amount, setAmount] = useState(contract.amount != null ? String(contract.amount) : "");
+  const [signedDate, setSignedDate] = useState(toDateInputValue(contract.signedDate));
+  const [startDate, setStartDate] = useState(toDateInputValue(contract.startDate));
+  const [endDate, setEndDate] = useState(toDateInputValue(contract.endDate));
+
+  const update = trpc.contracts.update.useMutation({
+    onSuccess: () => {
+      toast.success("已保存");
+      utils.contracts.bySponsor.invalidate({ sponsorId });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  return (
+    <div className="space-y-2">
+      <h4 className="text-xs font-medium text-muted-foreground">合同商务信息</h4>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label>合同金额（可选）</Label>
+          <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="元" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>签订日期（可选）</Label>
+          <Input type="date" value={signedDate} onChange={(e) => setSignedDate(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>合同起始日期（可选）</Label>
+          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>合同结束日期（可选）</Label>
+          <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+      </div>
+      <Button
+        size="sm"
+        onClick={() =>
+          update.mutate({
+            id: contract.id,
+            amount: amount ? Number(amount) : undefined,
+            signedDate: signedDate ? new Date(signedDate) : undefined,
+            startDate: startDate ? new Date(startDate) : undefined,
+            endDate: endDate ? new Date(endDate) : undefined,
+          })
+        }
+        disabled={update.isPending}
+      >
+        保存商务信息
+      </Button>
+    </div>
+  );
+}
+
+function ContractPaymentsManager({ contractId }: { contractId: number }) {
+  const utils = trpc.useUtils();
+  const { data: payments } = trpc.contracts.payments.byContract.useQuery({ contractId });
+  const [dueDate, setDueDate] = useState("");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+
+  const create = trpc.contracts.payments.create.useMutation({
+    onSuccess: () => {
+      setDueDate("");
+      setAmount("");
+      setNote("");
+      utils.contracts.payments.byContract.invalidate({ contractId });
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const update = trpc.contracts.payments.update.useMutation({
+    onSuccess: () => utils.contracts.payments.byContract.invalidate({ contractId }),
+  });
+  const deleteMutation = trpc.contracts.payments.delete.useMutation({
+    onSuccess: () => utils.contracts.payments.byContract.invalidate({ contractId }),
+  });
+
+  const totalAmount = payments?.reduce((sum, p) => sum + p.amount, 0) ?? 0;
+  const paidAmount = payments?.filter((p) => p.status === "paid").reduce((sum, p) => sum + p.amount, 0) ?? 0;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h4 className="text-xs font-medium text-muted-foreground">回款计划</h4>
+        {payments && payments.length > 0 && (
+          <span className="text-xs text-muted-foreground">
+            已回款 {paidAmount.toLocaleString()} / {totalAmount.toLocaleString()}
+          </span>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {payments?.map((p) => {
+          const isOverdue = p.status === "pending" && p.dueDate && new Date(p.dueDate).getTime() < Date.now();
+          return (
+            <div key={p.id} className="flex items-center gap-2 rounded-md border p-2 text-xs">
+              <span className="flex-1">
+                {p.dueDate ? new Date(p.dueDate).toLocaleDateString() : "无到期日"} · ￥{p.amount.toLocaleString()}
+                {p.note ? ` · ${p.note}` : ""}
+              </span>
+              {isOverdue && <Badge variant="destructive">已逾期</Badge>}
+              <Badge
+                className={p.status === "paid" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}
+                onClick={() =>
+                  update.mutate({
+                    id: p.id,
+                    status: p.status === "paid" ? "pending" : "paid",
+                    paidDate: p.status === "paid" ? undefined : new Date(),
+                  })
+                }
+                style={{ cursor: "pointer" }}
+              >
+                {p.status === "paid" ? "已回款" : "标记为已回款"}
+              </Badge>
+              <button
+                className="text-muted-foreground hover:text-destructive"
+                onClick={() => deleteMutation.mutate({ id: p.id })}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          );
+        })}
+        {payments?.length === 0 && <p className="text-xs text-muted-foreground">暂无回款计划</p>}
+      </div>
+      <div className="flex items-end gap-2">
+        <div className="space-y-1">
+          <Label className="text-xs">到期日</Label>
+          <Input type="date" className="h-8" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">金额</Label>
+          <Input
+            type="number"
+            className="h-8 w-24"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="元"
+          />
+        </div>
+        <div className="flex-1 space-y-1">
+          <Label className="text-xs">备注</Label>
+          <Input className="h-8" value={note} onChange={(e) => setNote(e.target.value)} placeholder="如：首付款" />
+        </div>
+        <Button
+          size="sm"
+          onClick={() => {
+            if (!amount) {
+              toast.error("请填写金额");
+              return;
+            }
+            create.mutate({
+              contractId,
+              dueDate: dueDate ? new Date(dueDate) : undefined,
+              amount: Number(amount),
+              note: note || undefined,
+            });
+          }}
+          disabled={create.isPending}
+        >
+          添加
+        </Button>
       </div>
     </div>
   );

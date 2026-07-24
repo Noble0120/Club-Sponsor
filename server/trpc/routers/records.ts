@@ -75,7 +75,9 @@ export const recordsRouter = router({
       const clubSponsors = await db
         .select()
         .from(sponsors)
-        .where(and(eq(sponsors.clubId, ctx.user.clubId!), eq(sponsors.isActive, true)))
+        .where(
+          and(eq(sponsors.clubId, ctx.user.clubId!), eq(sponsors.isActive, true), eq(sponsors.stage, "signed")),
+        )
         .orderBy(asc(sponsors.sortOrder));
 
       const records = await db

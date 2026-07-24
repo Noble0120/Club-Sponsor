@@ -3,19 +3,24 @@ import { and, asc, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
 import { db } from "../../db";
-import { sponsors } from "../../db/schema";
+import { sponsors, sponsorStageEnum } from "../../db/schema";
 
 const tierSchema = z.string().min(1);
+const stageSchema = z.enum(sponsorStageEnum);
 
 export const sponsorsRouter = router({
-  list: protectedProcedure.query(async ({ ctx }) => {
-    if (!ctx.user.clubId) return [];
-    return db
-      .select()
-      .from(sponsors)
-      .where(eq(sponsors.clubId, ctx.user.clubId))
-      .orderBy(asc(sponsors.sortOrder));
-  }),
+  list: protectedProcedure
+    .input(z.object({ stage: stageSchema.optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      if (!ctx.user.clubId) return [];
+      const conditions = [eq(sponsors.clubId, ctx.user.clubId)];
+      if (input?.stage) conditions.push(eq(sponsors.stage, input.stage));
+      return db
+        .select()
+        .from(sponsors)
+        .where(and(...conditions))
+        .orderBy(asc(sponsors.sortOrder));
+    }),
 
   get: protectedProcedure.input(z.object({ id: z.number() })).query(async ({ ctx, input }) => {
     const [sponsor] = await db
@@ -33,7 +38,8 @@ export const sponsorsRouter = router({
     .input(
       z.object({
         name: z.string().min(1),
-        tier: tierSchema,
+        tier: tierSchema.optional(),
+        stage: stageSchema.optional(),
         logoUrl: z.string().optional(),
         contactName: z.string().optional(),
         contactPhone: z.string().optional(),
@@ -45,6 +51,7 @@ export const sponsorsRouter = router({
       const [result] = await db.insert(sponsors).values({
         clubId: ctx.user.clubId!,
         ...input,
+        tier: input.tier || "待定",
       });
       const [sponsor] = await db.select().from(sponsors).where(eq(sponsors.id, result.insertId)).limit(1);
       return sponsor;
@@ -56,6 +63,7 @@ export const sponsorsRouter = router({
         id: z.number(),
         name: z.string().optional(),
         tier: tierSchema.optional(),
+        stage: stageSchema.optional(),
         logoUrl: z.string().optional(),
         contactName: z.string().optional(),
         contactPhone: z.string().optional(),

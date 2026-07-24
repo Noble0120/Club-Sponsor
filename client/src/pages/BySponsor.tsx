@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { colorForText, STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
 
 export default function BySponsor() {
-  const { data: sponsors } = trpc.sponsors.list.useQuery();
+  const { data: sponsors } = trpc.sponsors.list.useQuery({ stage: "signed" });
   const [search, setSearch] = useState("");
   const [sponsorId, setSponsorId] = useState<number | null>(null);
 

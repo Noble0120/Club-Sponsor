@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../../db";
 import { acceptanceRecords, matches, sponsors } from "../../db/schema";
@@ -22,7 +22,7 @@ export const dashboardRouter = router({
     const clubSponsors = await db
       .select()
       .from(sponsors)
-      .where(eq(sponsors.clubId, clubId));
+      .where(and(eq(sponsors.clubId, clubId), eq(sponsors.stage, "signed")));
 
     const matchIds = clubMatches.map((m) => m.id);
     const records =
@@ -52,7 +52,7 @@ export const dashboardRouter = router({
     const clubSponsors = await db
       .select()
       .from(sponsors)
-      .where(eq(sponsors.clubId, clubId));
+      .where(and(eq(sponsors.clubId, clubId), eq(sponsors.stage, "signed")));
     const clubMatches = await db.select().from(matches).where(eq(matches.clubId, clubId));
     const matchIds = clubMatches.map((m) => m.id);
     const records =

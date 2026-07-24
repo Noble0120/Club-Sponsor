@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/select";
 
 export default function Reports() {
-  const { data: sponsors } = trpc.sponsors.list.useQuery();
+  const { data: sponsors } = trpc.sponsors.list.useQuery({ stage: "signed" });
   const [sponsorId, setSponsorId] = useState<number | null>(null);
 
   const utils = trpc.useUtils();

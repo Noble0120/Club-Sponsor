@@ -87,6 +87,28 @@ export const REVIEW_STATUS_LABELS: Record<string, string> = {
   rejected: "已驳回",
 };
 
+export const SPONSOR_STAGE_LABELS: Record<string, string> = {
+  lead: "潜在客户",
+  negotiating: "洽谈中",
+  signed: "已签约",
+  lost: "已流失",
+};
+
+export const SPONSOR_STAGE_COLORS: Record<string, string> = {
+  lead: "bg-gray-100 text-gray-600",
+  negotiating: "bg-blue-100 text-blue-700",
+  signed: "bg-green-100 text-green-700",
+  lost: "bg-red-100 text-red-600",
+};
+
+export const ACTIVITY_TYPE_LABELS: Record<string, string> = {
+  visit: "拜访",
+  call: "电话",
+  email: "邮件",
+  meeting: "会议",
+  other: "其他",
+};
+
 export const REVIEW_STATUS_COLORS: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-700",
   approved: "bg-green-100 text-green-700",

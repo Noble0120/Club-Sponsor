@@ -26,7 +26,7 @@ export default function ByBenefit() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  const { data: sponsors } = trpc.sponsors.list.useQuery();
+  const { data: sponsors } = trpc.sponsors.list.useQuery({ stage: "signed" });
   const [sponsorId, setSponsorId] = useState<number | null>(
     params.get("sponsor") ? Number(params.get("sponsor")) : null,
   );

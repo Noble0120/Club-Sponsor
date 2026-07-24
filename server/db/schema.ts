@@ -7,6 +7,7 @@ import {
   boolean,
   timestamp,
   mysqlEnum,
+  decimal,
 } from "drizzle-orm/mysql-core";
 import { relations } from "drizzle-orm";
 
@@ -48,12 +49,17 @@ export const matches = mysqlTable("matches", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Sales pipeline stage — lets the business department track leads and negotiations
+// alongside already-signed sponsors in the same list.
+export const sponsorStageEnum = ["lead", "negotiating", "signed", "lost"] as const;
+
 // Free text so each club can define its own sponsorship tier names.
 export const sponsors = mysqlTable("sponsors", {
   id: int("id").autoincrement().primaryKey(),
   clubId: int("club_id").notNull(),
   name: varchar("name", { length: 100 }).notNull(),
   tier: varchar("tier", { length: 100 }).notNull(),
+  stage: mysqlEnum("stage", sponsorStageEnum).notNull().default("signed"),
   logoUrl: text("logo_url"),
   contactName: varchar("contact_name", { length: 100 }),
   contactPhone: varchar("contact_phone", { length: 50 }),
@@ -62,6 +68,21 @@ export const sponsors = mysqlTable("sponsors", {
   sortOrder: int("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+});
+
+// Follow-up log for the business/commercial department: visits, calls, meetings, etc. —
+// tracked for leads and negotiating prospects as well as already-signed sponsors.
+export const sponsorActivityTypeEnum = ["visit", "call", "email", "meeting", "other"] as const;
+
+export const sponsorActivities = mysqlTable("sponsor_activities", {
+  id: int("id").autoincrement().primaryKey(),
+  sponsorId: int("sponsor_id").notNull(),
+  type: mysqlEnum("type", sponsorActivityTypeEnum).notNull().default("other"),
+  content: text("content").notNull(),
+  contactPerson: varchar("contact_person", { length: 100 }),
+  followUpDate: timestamp("follow_up_date"),
+  createdBy: int("created_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // How a benefit's fulfillment is measured/tracked over the season:
@@ -106,6 +127,7 @@ export const benefitItems = mysqlTable("benefit_items", {
 
 // Stores the club's sponsor contract documents (PDFs) as a permanent repository, separate
 // from the transient AI extraction flow that reads them to auto-populate benefit_items.
+// Also carries the commercial terms (amount, term dates) the business department tracks.
 export const sponsorContracts = mysqlTable("sponsor_contracts", {
   id: int("id").autoincrement().primaryKey(),
   sponsorId: int("sponsor_id").notNull(),
@@ -114,8 +136,26 @@ export const sponsorContracts = mysqlTable("sponsor_contracts", {
   filename: varchar("filename", { length: 255 }),
   mimeType: varchar("mime_type", { length: 100 }),
   extractedText: longtext("extracted_text"),
+  amount: decimal("amount", { precision: 14, scale: 2, mode: "number" }),
+  signedDate: timestamp("signed_date"),
+  startDate: timestamp("start_date"),
+  endDate: timestamp("end_date"),
   uploadedBy: int("uploaded_by").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// A contract's payment/collection schedule (回款计划), tracked as installments.
+export const contractPayments = mysqlTable("contract_payments", {
+  id: int("id").autoincrement().primaryKey(),
+  contractId: int("contract_id").notNull(),
+  dueDate: timestamp("due_date"),
+  amount: decimal("amount", { precision: 14, scale: 2, mode: "number" }).notNull(),
+  status: mysqlEnum("status", ["pending", "paid"]).notNull().default("pending"),
+  paidDate: timestamp("paid_date"),
+  paidAmount: decimal("paid_amount", { precision: 14, scale: 2, mode: "number" }),
+  note: text("note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
 
 export const acceptanceRecords = mysqlTable("acceptance_records", {
@@ -285,7 +325,9 @@ export type Club = typeof clubs.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Match = typeof matches.$inferSelect;
 export type Sponsor = typeof sponsors.$inferSelect;
+export type SponsorActivity = typeof sponsorActivities.$inferSelect;
 export type SponsorContract = typeof sponsorContracts.$inferSelect;
+export type ContractPayment = typeof contractPayments.$inferSelect;
 export type BenefitItem = typeof benefitItems.$inferSelect;
 export type AcceptanceRecord = typeof acceptanceRecords.$inferSelect;
 export type BenefitCheckItem = typeof benefitCheckItems.$inferSelect;

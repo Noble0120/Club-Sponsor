@@ -4,6 +4,7 @@ import { clubsRouter } from "./clubs";
 import { userManagementRouter } from "./userManagement";
 import { matchesRouter } from "./matches";
 import { sponsorsRouter } from "./sponsors";
+import { sponsorActivitiesRouter } from "./sponsorActivities";
 import { contractsRouter } from "./contracts";
 import { benefitsRouter } from "./benefits";
 import { recordsRouter } from "./records";
@@ -19,6 +20,7 @@ export const appRouter = router({
   userManagement: userManagementRouter,
   matches: matchesRouter,
   sponsors: sponsorsRouter,
+  sponsorActivities: sponsorActivitiesRouter,
   contracts: contractsRouter,
   benefits: benefitsRouter,
   records: recordsRouter,

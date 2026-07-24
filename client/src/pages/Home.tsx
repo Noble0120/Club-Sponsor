@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { CalendarDays, Trophy, TrendingUp, AlertTriangle } from "lucide-react";
+import { CalendarDays, Trophy, TrendingUp, AlertTriangle, Clock } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -9,6 +9,7 @@ import { colorForText } from "@/lib/constants";
 export default function Home() {
   const { data: stats } = trpc.dashboard.stats.useQuery();
   const { data: progress } = trpc.dashboard.sponsorProgress.useQuery();
+  const { data: expiringContracts } = trpc.contracts.expiringSoon.useQuery();
 
   return (
     <div className="space-y-6">
@@ -60,6 +61,35 @@ export default function Home() {
           </CardContent>
         </Card>
       </div>
+
+      {expiringContracts && expiringContracts.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              即将到期合同（90天内）
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {expiringContracts.map((c) => (
+              <Link
+                key={c.id}
+                href={`/sponsor/${c.sponsorId}`}
+                className="flex items-center justify-between rounded-md border p-3 text-sm transition-colors hover:bg-accent/50"
+              >
+                <div>
+                  <span className="font-medium">{c.sponsor.name}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">{c.filename}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  {c.amount != null && <span className="text-xs text-muted-foreground">￥{c.amount.toLocaleString()}</span>}
+                  <Badge variant="destructive">{new Date(c.endDate!).toLocaleDateString()} 到期</Badge>
+                </div>
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
