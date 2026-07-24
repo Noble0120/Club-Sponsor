@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../../db";
@@ -90,13 +90,7 @@ export const recordsRouter = router({
           const items = await db
             .select()
             .from(benefitItems)
-            .where(
-              and(
-                eq(benefitItems.sponsorId, sponsor.id),
-                eq(benefitItems.itemType, "per_match"),
-                eq(benefitItems.isActive, true),
-              ),
-            );
+            .where(and(eq(benefitItems.sponsorId, sponsor.id), eq(benefitItems.isActive, true)));
 
           let filledCount = 0;
           if (record) {
@@ -205,13 +199,24 @@ export const recordsRouter = router({
         .from(benefitCheckItems)
         .where(eq(benefitCheckItems.recordId, recordId));
 
+      const benefitItemIds = input.checkItems.map((c) => c.benefitItemId);
+      const relevantItems =
+        benefitItemIds.length > 0
+          ? await db.select().from(benefitItems).where(inArray(benefitItems.id, benefitItemIds))
+          : [];
+
       for (const item of input.checkItems) {
         const existingCheck = existingCheckItems.find((c) => c.benefitItemId === item.benefitItemId);
+        const requiresApproval = relevantItems.find((i) => i.id === item.benefitItemId)?.requiresApproval ?? false;
+        // Resubmitting a check-in that requires approval sends it back to "pending" for re-review.
         const values = {
           fulfilled: item.fulfilled,
           note: item.note,
           completedCount: item.completedCount,
           attachmentUrls: item.attachmentUrls ? JSON.stringify(item.attachmentUrls) : undefined,
+          reviewStatus: requiresApproval ? ("pending" as const) : ("approved" as const),
+          reviewedBy: requiresApproval ? null : ctx.user.id,
+          reviewedAt: requiresApproval ? null : new Date(),
         };
         if (existingCheck) {
           await db

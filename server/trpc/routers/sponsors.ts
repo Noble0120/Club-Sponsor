@@ -3,9 +3,9 @@ import { and, asc, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
 import { db } from "../../db";
-import { sponsors, sponsorTierEnum } from "../../db/schema";
+import { sponsors } from "../../db/schema";
 
-const tierSchema = z.enum(sponsorTierEnum);
+const tierSchema = z.string().min(1);
 
 export const sponsorsRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {

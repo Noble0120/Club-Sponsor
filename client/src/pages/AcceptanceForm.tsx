@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "wouter";
 import { toast } from "sonner";
-import { Star, Upload, X, Loader2 } from "lucide-react";
+import { Star } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { fileToBase64, MAX_FILE_SIZE } from "@/lib/upload";
+import { FileDropUpload } from "@/components/FileDropUpload";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,7 +12,13 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { CATEGORY_LABELS, CATEGORY_COLORS, STATUS_LABELS } from "@/lib/constants";
+import {
+  colorForText,
+  STATUS_LABELS,
+  FULFILLMENT_MODE_LABELS,
+  REVIEW_STATUS_LABELS,
+  REVIEW_STATUS_COLORS,
+} from "@/lib/constants";
 
 type Fulfilled = "yes" | "no" | "partial" | "na";
 type Status = "pending" | "in_progress" | "completed" | "issue";
@@ -21,6 +28,7 @@ interface ItemState {
   note: string;
   completedCount: string;
   attachmentUrls: string[];
+  reviewStatus?: "pending" | "approved" | "rejected";
 }
 
 export default function AcceptanceForm() {
@@ -58,6 +66,7 @@ export default function AcceptanceForm() {
         note: check?.note ?? "",
         completedCount: check?.completedCount != null ? String(check.completedCount) : "",
         attachmentUrls: check?.attachmentUrls ? JSON.parse(check.attachmentUrls) : [],
+        reviewStatus: check?.reviewStatus,
       };
     }
     setItems(initial);
@@ -68,9 +77,10 @@ export default function AcceptanceForm() {
     const active = benefits?.filter((b) => b.isActive) ?? [];
     const map = new Map<string, typeof active>();
     for (const item of active) {
-      const list = map.get(item.category) ?? [];
+      const key = item.category || "未分类";
+      const list = map.get(key) ?? [];
       list.push(item);
-      map.set(item.category, list);
+      map.set(key, list);
     }
     return Array.from(map.entries());
   }, [benefits]);
@@ -88,8 +98,7 @@ export default function AcceptanceForm() {
 
   const uploadMutation = trpc.upload.image.useMutation();
 
-  async function handleFileSelect(id: number, files: FileList | null) {
-    if (!files || files.length === 0) return;
+  async function handleFileSelect(id: number, files: FileList | File[]) {
     for (const file of Array.from(files)) {
       if (file.size > MAX_FILE_SIZE) {
         toast.error(`文件 ${file.name} 超过 16MB 限制`);
@@ -98,8 +107,11 @@ export default function AcceptanceForm() {
       try {
         const base64 = await fileToBase64(file);
         const result = await uploadMutation.mutateAsync({ base64, mimeType: file.type, filename: file.name });
-        updateItem(id, { attachmentUrls: [...(items[id]?.attachmentUrls ?? []), result.url] });
-      } catch (err) {
+        setItems((prev) => ({
+          ...prev,
+          [id]: { ...prev[id], attachmentUrls: [...(prev[id]?.attachmentUrls ?? []), result.url] },
+        }));
+      } catch {
         toast.error("文件上传失败");
       }
     }
@@ -181,8 +193,8 @@ export default function AcceptanceForm() {
         <Card key={category}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <Badge className={CATEGORY_COLORS[category]} variant="outline">
-                {categoryItems[0]?.categoryLabel || CATEGORY_LABELS[category]}
+              <Badge className={colorForText(category)} variant="outline">
+                {category}
               </Badge>
             </CardTitle>
           </CardHeader>
@@ -192,81 +204,32 @@ export default function AcceptanceForm() {
               if (!state) return null;
               return (
                 <div key={item.id} className="space-y-2 rounded-lg border p-3">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {item.code && <span className="text-xs text-muted-foreground">{item.code}</span>}
                     <span className="font-medium">{item.name}</span>
-                    <Select
-                      value={state.fulfilled}
-                      onValueChange={(v) => updateItem(item.id, { fulfilled: v as Fulfilled })}
-                    >
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="yes">已履约</SelectItem>
-                        <SelectItem value="no">未履约</SelectItem>
-                        <SelectItem value="partial">部分履约</SelectItem>
-                        <SelectItem value="na">不适用</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Badge variant="outline">{FULFILLMENT_MODE_LABELS[item.fulfillmentMode]}</Badge>
+                    {item.requiresApproval && <Badge variant="secondary">需审核</Badge>}
+                    {state.reviewStatus && state.reviewStatus !== "approved" && (
+                      <Badge className={REVIEW_STATUS_COLORS[state.reviewStatus]}>
+                        {REVIEW_STATUS_LABELS[state.reviewStatus]}
+                      </Badge>
+                    )}
                   </div>
-                  {item.description && <p className="text-xs text-muted-foreground">{item.description}</p>}
-
-                  {state.fulfilled !== "na" && (
-                    <div className="space-y-2">
-                      {item.totalCount != null && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-muted-foreground">已完成数量</span>
-                          <Input
-                            type="number"
-                            className="w-24"
-                            value={state.completedCount}
-                            onChange={(e) => updateItem(item.id, { completedCount: e.target.value })}
-                          />
-                          <span className="text-sm text-muted-foreground">
-                            / {item.totalCount} {item.countUnit}
-                          </span>
-                        </div>
-                      )}
-                      <Textarea
-                        placeholder="备注（可选）"
-                        value={state.note}
-                        onChange={(e) => updateItem(item.id, { note: e.target.value })}
-                      />
-                      <div className="flex flex-wrap items-center gap-2">
-                        {state.attachmentUrls.map((url, idx) => (
-                          <div key={idx} className="relative">
-                            <a href={url} target="_blank" rel="noreferrer" className="text-xs text-primary underline">
-                              附件 {idx + 1}
-                            </a>
-                            <button
-                              onClick={() =>
-                                updateItem(item.id, {
-                                  attachmentUrls: state.attachmentUrls.filter((_, i) => i !== idx),
-                                })
-                              }
-                              className="ml-1 text-muted-foreground hover:text-destructive"
-                            >
-                              <X className="inline h-3 w-3" />
-                            </button>
-                          </div>
-                        ))}
-                        <label className="flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent">
-                          {uploadMutation.isPending ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Upload className="h-3 w-3" />
-                          )}
-                          上传文件
-                          <input
-                            type="file"
-                            className="hidden"
-                            multiple
-                            onChange={(e) => handleFileSelect(item.id, e.target.files)}
-                          />
-                        </label>
-                      </div>
+                  {(item.description || item.scope || item.attachmentRequirement) && (
+                    <div className="space-y-0.5 text-xs text-muted-foreground">
+                      {item.description && <p>{item.description}</p>}
+                      {item.scope && <p>适用范围：{item.scope}</p>}
+                      {item.attachmentRequirement && <p>附件要求：{item.attachmentRequirement}</p>}
                     </div>
                   )}
+
+                  <ModeInput
+                    item={item}
+                    state={state}
+                    onChange={(patch) => updateItem(item.id, patch)}
+                    onFiles={(files) => handleFileSelect(item.id, files)}
+                    isUploading={uploadMutation.isPending}
+                  />
                 </div>
               );
             })}
@@ -284,6 +247,115 @@ export default function AcceptanceForm() {
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+interface BenefitItemLike {
+  id: number;
+  fulfillmentMode: string;
+  targetCount: number | null;
+  countUnit: string | null;
+}
+
+function ModeInput({
+  item,
+  state,
+  onChange,
+  onFiles,
+  isUploading,
+}: {
+  item: BenefitItemLike;
+  state: ItemState;
+  onChange: (patch: Partial<ItemState>) => void;
+  onFiles: (files: FileList | File[]) => void;
+  isUploading: boolean;
+}) {
+  if (item.fulfillmentMode === "QUANTITY" || item.fulfillmentMode === "EVENT") {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">本场新增数量</span>
+          <Input
+            type="number"
+            className="w-24"
+            value={state.completedCount}
+            onChange={(e) => {
+              const value = e.target.value;
+              onChange({ completedCount: value, fulfilled: Number(value) > 0 ? "yes" : "na" });
+            }}
+          />
+          {item.countUnit && <span className="text-sm text-muted-foreground">{item.countUnit}</span>}
+          {item.targetCount != null && (
+            <span className="text-sm text-muted-foreground">（全季目标 {item.targetCount}{item.countUnit}）</span>
+          )}
+        </div>
+        <Textarea placeholder="备注（可选）" value={state.note} onChange={(e) => onChange({ note: e.target.value })} />
+        <FileDropUpload urls={state.attachmentUrls} onFiles={onFiles} isUploading={isUploading} onRemove={(idx) => onChange({ attachmentUrls: state.attachmentUrls.filter((_, i) => i !== idx) })} />
+      </div>
+    );
+  }
+
+  if (item.fulfillmentMode === "ONE_TIME") {
+    return (
+      <div className="space-y-2">
+        <button
+          onClick={() => onChange({ fulfilled: state.fulfilled === "yes" ? "na" : "yes" })}
+          className={cn(
+            "rounded-md border px-3 py-1.5 text-sm transition-colors",
+            state.fulfilled === "yes" ? "border-primary bg-primary text-primary-foreground" : "hover:bg-accent",
+          )}
+        >
+          {state.fulfilled === "yes" ? "已在此场标记完成" : "标记为已完成"}
+        </button>
+        {state.fulfilled === "yes" && (
+          <>
+            <Textarea placeholder="备注（可选）" value={state.note} onChange={(e) => onChange({ note: e.target.value })} />
+            <FileDropUpload urls={state.attachmentUrls} onFiles={onFiles} isUploading={isUploading} onRemove={(idx) => onChange({ attachmentUrls: state.attachmentUrls.filter((_, i) => i !== idx) })} />
+          </>
+        )}
+      </div>
+    );
+  }
+
+  if (item.fulfillmentMode === "CONTINUOUS") {
+    return (
+      <div className="space-y-2">
+        <Select value={state.fulfilled === "no" ? "no" : "yes"} onValueChange={(v) => onChange({ fulfilled: v as Fulfilled })}>
+          <SelectTrigger className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="yes">正常持续</SelectItem>
+            <SelectItem value="no">发生中断</SelectItem>
+          </SelectContent>
+        </Select>
+        <Textarea placeholder="备注（可选）" value={state.note} onChange={(e) => onChange({ note: e.target.value })} />
+        <FileDropUpload urls={state.attachmentUrls} onFiles={onFiles} isUploading={isUploading} onRemove={(idx) => onChange({ attachmentUrls: state.attachmentUrls.filter((_, i) => i !== idx) })} />
+      </div>
+    );
+  }
+
+  // MATCH / ROUND
+  return (
+    <div className="space-y-2">
+      <Select value={state.fulfilled} onValueChange={(v) => onChange({ fulfilled: v as Fulfilled })}>
+        <SelectTrigger className="w-32">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="yes">已履约</SelectItem>
+          <SelectItem value="no">未履约</SelectItem>
+          <SelectItem value="partial">部分履约</SelectItem>
+          <SelectItem value="na">不适用</SelectItem>
+        </SelectContent>
+      </Select>
+      {state.fulfilled !== "na" && (
+        <>
+          <Textarea placeholder="备注（可选）" value={state.note} onChange={(e) => onChange({ note: e.target.value })} />
+          <FileDropUpload urls={state.attachmentUrls} onFiles={onFiles} isUploading={isUploading} onRemove={(idx) => onChange({ attachmentUrls: state.attachmentUrls.filter((_, i) => i !== idx) })} />
+        </>
+      )}
     </div>
   );
 }

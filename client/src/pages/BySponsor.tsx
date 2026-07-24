@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { TIER_LABELS, TIER_COLORS, STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
+import { colorForText, STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
 
 export default function BySponsor() {
   const { data: sponsors } = trpc.sponsors.list.useQuery();
@@ -60,10 +60,10 @@ export default function BySponsor() {
                 >
                   <span className="truncate">{s.name}</span>
                   <Badge
-                    className={cn(sponsorId === s.id ? "" : TIER_COLORS[s.tier], "flex-shrink-0")}
+                    className={cn(sponsorId === s.id ? "" : colorForText(s.tier), "flex-shrink-0")}
                     variant="outline"
                   >
-                    {TIER_LABELS[s.tier]}
+                    {s.tier}
                   </Badge>
                 </button>
               ))}

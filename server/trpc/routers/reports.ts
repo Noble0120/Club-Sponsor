@@ -16,13 +16,13 @@ import {
 } from "../../db/schema";
 import { invokeLLM } from "../../lib/llm";
 
-const TIER_LABELS: Record<string, string> = {
-  title: "冠名赞助商",
-  exclusive_premier: "独家首席合作伙伴",
-  exclusive_premium: "独家尊享合作伙伴",
-  gold: "黄金赞助商",
-  official: "官方合作伙伴",
-  supplier: "官方指定供应商",
+const FULFILLMENT_MODE_LABELS: Record<string, string> = {
+  QUANTITY: "数量累计型",
+  MATCH: "逐场型",
+  ROUND: "逐轮型",
+  EVENT: "活动次数型",
+  ONE_TIME: "一次性",
+  CONTINUOUS: "持续型",
 };
 
 const FULFILLED_LABELS: Record<string, string> = {
@@ -66,7 +66,10 @@ async function buildSponsorPrompt(sponsorId: number, clubId: number) {
   const avgRating = ratings.length > 0 ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : "无";
 
   const itemsSection = items
-    .map((i) => `- ${i.name}（${i.itemType === "per_match" ? "场次型" : "全季型"}）`)
+    .map(
+      (i) =>
+        `- ${i.name}（${FULFILLMENT_MODE_LABELS[i.fulfillmentMode]}${i.targetCount ? `，目标${i.targetCount}${i.countUnit ?? ""}` : ""}）`,
+    )
     .join("\n");
 
   const detailSection = clubMatches
@@ -89,7 +92,7 @@ async function buildSponsorPrompt(sponsorId: number, clubId: number) {
 
 ## 赞助商基本信息
 - 赞助商名称：${sponsor.name}
-- 赞助层级：${TIER_LABELS[sponsor.tier]}
+- 赞助层级：${sponsor.tier}
 - 备注：${sponsor.notes ?? "无"}
 
 ## 权益条目列表（共${items.length}条）
@@ -129,7 +132,7 @@ async function buildSeasonPrompt(clubId: number) {
       const sponsorRecords = records.filter((r) => r.sponsorId === sponsor.id);
       const completed = sponsorRecords.filter((r) => r.status === "completed").length;
       const issues = sponsorRecords.filter((r) => r.status === "issue").length;
-      return `| ${sponsor.name} | ${TIER_LABELS[sponsor.tier]} | ${sponsorRecords.length}/${clubMatches.length} | ${completed} | ${issues} |`;
+      return `| ${sponsor.name} | ${sponsor.tier} | ${sponsorRecords.length}/${clubMatches.length} | ${completed} | ${issues} |`;
     })
     .join("\n");
 

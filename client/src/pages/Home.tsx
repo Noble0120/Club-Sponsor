@@ -4,7 +4,7 @@ import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { TIER_LABELS, TIER_COLORS } from "@/lib/constants";
+import { colorForText } from "@/lib/constants";
 
 export default function Home() {
   const { data: stats } = trpc.dashboard.stats.useQuery();
@@ -77,8 +77,8 @@ export default function Home() {
             >
               <div className="w-40 flex-shrink-0">
                 <div className="truncate font-medium">{p.sponsor.name}</div>
-                <Badge className={TIER_COLORS[p.sponsor.tier]} variant="outline">
-                  {TIER_LABELS[p.sponsor.tier]}
+                <Badge className={colorForText(p.sponsor.tier)} variant="outline">
+                  {p.sponsor.tier}
                 </Badge>
               </div>
               <div className="flex-1">

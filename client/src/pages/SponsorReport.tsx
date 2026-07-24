@@ -6,8 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  TIER_LABELS,
-  TIER_COLORS,
+  colorForText,
   STATUS_LABELS,
   STATUS_COLORS,
   FULFILLED_LABELS,
@@ -57,8 +56,8 @@ export default function SponsorReport() {
         <div className="mb-6">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold">{sponsor.name}</h1>
-            <Badge className={TIER_COLORS[sponsor.tier]} variant="outline">
-              {TIER_LABELS[sponsor.tier]}
+            <Badge className={colorForText(sponsor.tier)} variant="outline">
+              {sponsor.tier}
             </Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">

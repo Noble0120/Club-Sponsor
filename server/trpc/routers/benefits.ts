@@ -1,11 +1,19 @@
 import { z } from "zod";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
 import { db } from "../../db";
-import { benefitItems, benefitCheckItems, acceptanceRecords, sponsors, benefitCategoryEnum } from "../../db/schema";
+import {
+  benefitItems,
+  benefitCheckItems,
+  acceptanceRecords,
+  sponsors,
+  matches,
+  fulfillmentModeEnum,
+} from "../../db/schema";
+import { computeBenefitItemProgress } from "../../lib/benefitProgress";
 
-const categorySchema = z.enum(benefitCategoryEnum);
+const fulfillmentModeSchema = z.enum(fulfillmentModeEnum);
 
 async function assertSponsorInClub(sponsorId: number, clubId: number) {
   const [sponsor] = await db
@@ -28,6 +36,24 @@ async function getBenefitItemWithSponsor(benefitItemId: number) {
   return { item, sponsor };
 }
 
+const benefitItemFields = {
+  code: z.string().optional(),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  fulfillmentMode: fulfillmentModeSchema.default("MATCH"),
+  targetCount: z.number().optional(),
+  countUnit: z.string().optional(),
+  category: z.string().optional(),
+  startDate: z.coerce.date().optional(),
+  endDate: z.coerce.date().optional(),
+  scope: z.string().optional(),
+  attachmentRequirement: z.string().optional(),
+  requiresApproval: z.boolean().optional(),
+  assigneeId: z.number().optional(),
+  contractNote: z.string().optional(),
+  sortOrder: z.number().optional(),
+};
+
 export const benefitsRouter = router({
   bySponsor: protectedProcedure
     .input(z.object({ sponsorId: z.number() }))
@@ -41,19 +67,7 @@ export const benefitsRouter = router({
     }),
 
   create: adminProcedure
-    .input(
-      z.object({
-        sponsorId: z.number(),
-        name: z.string().min(1),
-        description: z.string().optional(),
-        itemType: z.enum(["per_match", "season"]).default("per_match"),
-        totalCount: z.number().optional(),
-        countUnit: z.string().optional(),
-        category: categorySchema,
-        categoryLabel: z.string().optional(),
-        sortOrder: z.number().optional(),
-      }),
-    )
+    .input(z.object({ sponsorId: z.number(), ...benefitItemFields }))
     .mutation(async ({ ctx, input }) => {
       await assertSponsorInClub(input.sponsorId, ctx.user.clubId!);
       const [result] = await db.insert(benefitItems).values(input);
@@ -65,13 +79,20 @@ export const benefitsRouter = router({
     .input(
       z.object({
         id: z.number(),
-        name: z.string().optional(),
+        code: z.string().optional(),
+        name: z.string().min(1).optional(),
         description: z.string().optional(),
-        itemType: z.enum(["per_match", "season"]).optional(),
-        totalCount: z.number().optional(),
+        fulfillmentMode: fulfillmentModeSchema.optional(),
+        targetCount: z.number().optional(),
         countUnit: z.string().optional(),
-        category: categorySchema.optional(),
-        categoryLabel: z.string().optional(),
+        category: z.string().optional(),
+        startDate: z.coerce.date().optional(),
+        endDate: z.coerce.date().optional(),
+        scope: z.string().optional(),
+        attachmentRequirement: z.string().optional(),
+        requiresApproval: z.boolean().optional(),
+        assigneeId: z.number().optional(),
+        contractNote: z.string().optional(),
         sortOrder: z.number().optional(),
         isActive: z.boolean().optional(),
       }),
@@ -101,46 +122,172 @@ export const benefitsRouter = router({
   progressBySponsor: protectedProcedure
     .input(z.object({ sponsorId: z.number() }))
     .query(async ({ ctx, input }) => {
-      await assertSponsorInClub(input.sponsorId, ctx.user.clubId!);
+      const clubId = ctx.user.clubId!;
+      await assertSponsorInClub(input.sponsorId, clubId);
 
-      const seasonItems = await db
+      const items = await db
         .select()
         .from(benefitItems)
-        .where(and(eq(benefitItems.sponsorId, input.sponsorId), eq(benefitItems.itemType, "season")))
+        .where(and(eq(benefitItems.sponsorId, input.sponsorId), eq(benefitItems.isActive, true)))
         .orderBy(asc(benefitItems.sortOrder));
 
-      if (seasonItems.length === 0) {
-        return { total: 0, completed: 0, items: [] };
-      }
-
-      const records = await db
+      const clubMatches = await db.select().from(matches).where(eq(matches.clubId, clubId));
+      const sponsorRecords = await db
         .select()
         .from(acceptanceRecords)
         .where(eq(acceptanceRecords.sponsorId, input.sponsorId));
-      const recordIds = records.map((r) => r.id);
+      const recordIds = sponsorRecords.map((r) => r.id);
+      const itemIds = items.map((i) => i.id);
 
-      const seasonItemIds = seasonItems.map((i) => i.id);
       const checkItems =
-        recordIds.length > 0
+        recordIds.length > 0 && itemIds.length > 0
           ? await db
               .select()
               .from(benefitCheckItems)
               .where(
                 and(
                   inArray(benefitCheckItems.recordId, recordIds),
-                  inArray(benefitCheckItems.benefitItemId, seasonItemIds),
+                  inArray(benefitCheckItems.benefitItemId, itemIds),
                 ),
               )
-              .orderBy(desc(benefitCheckItems.updatedAt))
           : [];
 
-      const items = seasonItems.map((benefitItem) => {
-        const latestCheck = checkItems.find((c) => c.benefitItemId === benefitItem.id) ?? null;
-        return { benefitItem, latestCheck };
-      });
+      const progress = items.map((item) =>
+        computeBenefitItemProgress(
+          item,
+          clubMatches,
+          sponsorRecords,
+          checkItems.filter((c) => c.benefitItemId === item.id),
+        ),
+      );
 
-      const completed = items.filter((i) => i.latestCheck?.fulfilled === "yes").length;
+      return progress;
+    }),
 
-      return { total: seasonItems.length, completed, items };
+  // Rows already parsed client-side from the uploaded spreadsheet. Sponsors are matched by
+  // name (case-insensitive) within the club and auto-created if no match exists.
+  importList: adminProcedure
+    .input(
+      z.array(
+        z.object({
+          sponsorName: z.string().min(1),
+          name: z.string().min(1),
+          category: z.string().optional(),
+          fulfillmentMode: fulfillmentModeSchema,
+          targetCount: z.number().optional(),
+          countUnit: z.string().optional(),
+          startDate: z.coerce.date().optional(),
+          endDate: z.coerce.date().optional(),
+        }),
+      ),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const clubId = ctx.user.clubId!;
+      const clubSponsors = await db.select().from(sponsors).where(eq(sponsors.clubId, clubId));
+      const sponsorsCreated: string[] = [];
+
+      let created = 0;
+      for (const row of input) {
+        let sponsor = clubSponsors.find(
+          (s) => s.name.trim().toLowerCase() === row.sponsorName.trim().toLowerCase(),
+        );
+        if (!sponsor) {
+          const [result] = await db.insert(sponsors).values({
+            clubId,
+            name: row.sponsorName.trim(),
+            tier: "待设置",
+          });
+          const [newSponsor] = await db.select().from(sponsors).where(eq(sponsors.id, result.insertId)).limit(1);
+          sponsor = newSponsor;
+          clubSponsors.push(sponsor);
+          sponsorsCreated.push(sponsor.name);
+        }
+
+        await db.insert(benefitItems).values({
+          sponsorId: sponsor.id,
+          name: row.name,
+          category: row.category || "",
+          fulfillmentMode: row.fulfillmentMode,
+          targetCount: row.targetCount,
+          countUnit: row.countUnit,
+          startDate: row.startDate,
+          endDate: row.endDate,
+        });
+        created += 1;
+      }
+
+      return { created, sponsorsCreated };
+    }),
+
+  pendingReviews: adminProcedure.query(async ({ ctx }) => {
+    const clubId = ctx.user.clubId!;
+    const clubSponsors = await db.select().from(sponsors).where(eq(sponsors.clubId, clubId));
+    const sponsorIds = clubSponsors.map((s) => s.id);
+    if (sponsorIds.length === 0) return [];
+
+    const items = await db.select().from(benefitItems).where(inArray(benefitItems.sponsorId, sponsorIds));
+    const itemIds = items.map((i) => i.id);
+    if (itemIds.length === 0) return [];
+
+    const records = await db
+      .select()
+      .from(acceptanceRecords)
+      .where(inArray(acceptanceRecords.sponsorId, sponsorIds));
+    const recordIds = records.map((r) => r.id);
+    if (recordIds.length === 0) return [];
+
+    const pending = await db
+      .select()
+      .from(benefitCheckItems)
+      .where(
+        and(
+          inArray(benefitCheckItems.recordId, recordIds),
+          inArray(benefitCheckItems.benefitItemId, itemIds),
+          eq(benefitCheckItems.reviewStatus, "pending"),
+        ),
+      );
+
+    const matchIds = [...new Set(records.map((r) => r.matchId))];
+    const matchRows = matchIds.length > 0 ? await db.select().from(matches).where(inArray(matches.id, matchIds)) : [];
+
+    return pending.map((checkItem) => {
+      const record = records.find((r) => r.id === checkItem.recordId)!;
+      const benefitItem = items.find((i) => i.id === checkItem.benefitItemId)!;
+      const sponsor = clubSponsors.find((s) => s.id === record.sponsorId)!;
+      const match = matchRows.find((m) => m.id === record.matchId)!;
+      return { checkItem, benefitItem, sponsor, match };
+    });
+  }),
+
+  reviewCheckItem: adminProcedure
+    .input(z.object({ checkItemId: z.number(), approve: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const [checkItem] = await db
+        .select()
+        .from(benefitCheckItems)
+        .where(eq(benefitCheckItems.id, input.checkItemId))
+        .limit(1);
+      if (!checkItem) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const { sponsor } = await getBenefitItemWithSponsor(checkItem.benefitItemId);
+      if (!sponsor || sponsor.clubId !== ctx.user.clubId) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      await db
+        .update(benefitCheckItems)
+        .set({
+          reviewStatus: input.approve ? "approved" : "rejected",
+          reviewedBy: ctx.user.id,
+          reviewedAt: new Date(),
+        })
+        .where(eq(benefitCheckItems.id, input.checkItemId));
+
+      const [updated] = await db
+        .select()
+        .from(benefitCheckItems)
+        .where(eq(benefitCheckItems.id, input.checkItemId))
+        .limit(1);
+      return updated;
     }),
 });

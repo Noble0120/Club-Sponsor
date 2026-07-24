@@ -4,7 +4,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { TIER_LABELS, TIER_COLORS, STATUS_LABELS, STATUS_COLORS, FULFILLED_LABELS, FULFILLED_COLORS } from "@/lib/constants";
+import {
+  colorForText,
+  STATUS_LABELS,
+  STATUS_COLORS,
+  FULFILLMENT_MODE_LABELS,
+  PROGRESS_STATUS_LABELS,
+  PROGRESS_STATUS_COLORS,
+} from "@/lib/constants";
 
 export default function SponsorDetail() {
   const { id } = useParams<{ id: string }>();
@@ -22,8 +29,8 @@ export default function SponsorDetail() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold">{sponsor.name}</h1>
-            <Badge className={TIER_COLORS[sponsor.tier]} variant="outline">
-              {TIER_LABELS[sponsor.tier]}
+            <Badge className={colorForText(sponsor.tier)} variant="outline">
+              {sponsor.tier}
             </Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -35,29 +42,43 @@ export default function SponsorDetail() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">全季权益进度</CardTitle>
+          <CardTitle className="text-base">权益履约进度</CardTitle>
         </CardHeader>
         <CardContent>
-          {!progress || progress.total === 0 ? (
-            <p className="text-sm text-muted-foreground">该赞助商暂无全季型权益条目</p>
+          {!progress || progress.length === 0 ? (
+            <p className="text-sm text-muted-foreground">该赞助商暂无权益条目</p>
           ) : (
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <Progress value={(progress.completed / progress.total) * 100} className="h-2 flex-1" />
-                <span className="text-sm text-muted-foreground">
-                  {progress.completed}/{progress.total}
-                </span>
-              </div>
-              <div className="space-y-2">
-                {progress.items.map(({ benefitItem, latestCheck }) => (
-                  <div key={benefitItem.id} className="flex items-center justify-between rounded-md border p-2 text-sm">
-                    <span>{benefitItem.name}</span>
-                    <Badge className={FULFILLED_COLORS[latestCheck?.fulfilled ?? "na"]}>
-                      {FULFILLED_LABELS[latestCheck?.fulfilled ?? "na"]}
-                    </Badge>
+            <div className="space-y-2">
+              {progress.map((p) => (
+                <Link
+                  key={p.benefitItem.id}
+                  href={`/by-benefit?sponsor=${sponsorId}&item=${p.benefitItem.id}`}
+                  className="block rounded-md border p-3 text-sm transition-colors hover:bg-accent/50"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{p.benefitItem.name}</span>
+                      <Badge variant="outline">{FULFILLMENT_MODE_LABELS[p.benefitItem.fulfillmentMode]}</Badge>
+                      {p.pendingReviewCount > 0 && (
+                        <Badge className="bg-yellow-100 text-yellow-700">{p.pendingReviewCount}条待审核</Badge>
+                      )}
+                    </div>
+                    <Badge className={PROGRESS_STATUS_COLORS[p.status]}>{PROGRESS_STATUS_LABELS[p.status]}</Badge>
                   </div>
-                ))}
-              </div>
+                  {p.targetCount != null && (
+                    <div className="mt-2 flex items-center gap-3">
+                      <Progress
+                        value={p.targetCount > 0 ? (p.completedCount / p.targetCount) * 100 : 0}
+                        className="h-1.5 flex-1"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {p.completedCount}/{p.targetCount}
+                        {p.benefitItem.countUnit ?? ""}
+                      </span>
+                    </div>
+                  )}
+                </Link>
+              ))}
             </div>
           )}
         </CardContent>

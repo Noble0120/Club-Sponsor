@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   CalendarDays,
   Trophy,
+  ListChecks,
   CheckSquare,
   Settings,
   Users,
@@ -34,11 +35,13 @@ const MAIN_NAV: NavItem[] = [
   { label: "总览", path: "/", icon: LayoutDashboard },
   { label: "按轮次查看", path: "/by-round", icon: CalendarDays },
   { label: "按赞助商查看", path: "/by-sponsor", icon: Trophy },
+  { label: "按权益查看", path: "/by-benefit", icon: ListChecks },
   { label: "我的待办", path: "/my-tasks", icon: CheckSquare },
 ];
 
 const ADMIN_NAV: NavItem[] = [
   { label: "赞助商管理", path: "/sponsors-admin", icon: Settings },
+  { label: "赛程管理", path: "/matches-admin", icon: CalendarDays },
   { label: "用户管理", path: "/user-management", icon: Users },
   { label: "验收报告", path: "/reports", icon: FileText },
   { label: "工作流管理", path: "/workflow", icon: GitBranch },
@@ -107,7 +110,7 @@ export function Sidebar({ user }: SidebarProps) {
         <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <Trophy className="h-5 w-5" />
         </div>
-        {!collapsed && <span className="truncate font-semibold">铜梁龙权益验收</span>}
+        {!collapsed && <span className="truncate font-semibold">俱乐部赞助商管理</span>}
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-2">

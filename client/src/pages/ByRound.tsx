@@ -7,14 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  TIER_LABELS,
-  TIER_COLORS,
+  colorForText,
   STATUS_LABELS,
   STATUS_COLORS,
-  CATEGORY_LABELS,
-  CATEGORY_COLORS,
   FULFILLED_LABELS,
   FULFILLED_COLORS,
+  FULFILLMENT_MODE_LABELS,
+  REVIEW_STATUS_LABELS,
+  REVIEW_STATUS_COLORS,
 } from "@/lib/constants";
 
 export default function ByRound() {
@@ -87,7 +87,7 @@ function SponsorMatchCard({
   );
 
   const status = row.record?.status ?? "pending";
-  const perMatchBenefits = benefits?.filter((b) => b.itemType === "per_match" && b.isActive) ?? [];
+  const activeBenefits = benefits?.filter((b) => b.isActive) ?? [];
 
   return (
     <Card>
@@ -99,8 +99,8 @@ function SponsorMatchCard({
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <span className="font-medium">{row.sponsor.name}</span>
-            <Badge className={TIER_COLORS[row.sponsor.tier]} variant="outline">
-              {TIER_LABELS[row.sponsor.tier]}
+            <Badge className={colorForText(row.sponsor.tier)} variant="outline">
+              {row.sponsor.tier}
             </Badge>
           </div>
         </div>
@@ -115,19 +115,24 @@ function SponsorMatchCard({
 
       {expanded && (
         <CardContent className="border-t pt-4">
-          {perMatchBenefits.length === 0 && (
-            <p className="text-sm text-muted-foreground">该赞助商暂无场次型权益条目</p>
+          {activeBenefits.length === 0 && (
+            <p className="text-sm text-muted-foreground">该赞助商暂无权益条目</p>
           )}
           <div className="space-y-2">
-            {perMatchBenefits.map((item) => {
+            {activeBenefits.map((item) => {
               const check = recordDetail?.checkItems.find((c) => c.benefitItemId === item.id);
               const fulfilled = check?.fulfilled ?? "na";
               return (
                 <div key={item.id} className="flex items-center gap-3 rounded-md border p-2 text-sm">
-                  <Badge className={CATEGORY_COLORS[item.category]} variant="outline">
-                    {item.categoryLabel || CATEGORY_LABELS[item.category]}
+                  <Badge className={colorForText(item.category || item.fulfillmentMode)} variant="outline">
+                    {item.category || FULFILLMENT_MODE_LABELS[item.fulfillmentMode]}
                   </Badge>
                   <span className="flex-1">{item.name}</span>
+                  {check && check.reviewStatus !== "approved" && (
+                    <Badge className={REVIEW_STATUS_COLORS[check.reviewStatus]}>
+                      {REVIEW_STATUS_LABELS[check.reviewStatus]}
+                    </Badge>
+                  )}
                   <Badge className={FULFILLED_COLORS[fulfilled]}>{FULFILLED_LABELS[fulfilled]}</Badge>
                 </div>
               );

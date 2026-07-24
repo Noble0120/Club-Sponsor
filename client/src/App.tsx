@@ -6,6 +6,7 @@ import SponsorReport from "@/pages/SponsorReport";
 import Home from "@/pages/Home";
 import ByRound from "@/pages/ByRound";
 import BySponsor from "@/pages/BySponsor";
+import ByBenefit from "@/pages/ByBenefit";
 import SponsorDetail from "@/pages/SponsorDetail";
 import AcceptanceForm from "@/pages/AcceptanceForm";
 import MyTasks from "@/pages/MyTasks";
@@ -14,6 +15,7 @@ import UserManagement from "@/pages/UserManagement";
 import Reports from "@/pages/Reports";
 import WorkflowTemplates from "@/pages/WorkflowTemplates";
 import WorkflowOverview from "@/pages/WorkflowOverview";
+import MatchesAdmin from "@/pages/MatchesAdmin";
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -44,6 +46,11 @@ export default function App() {
           <BySponsor />
         </DashboardLayout>
       </Route>
+      <Route path="/by-benefit">
+        <DashboardLayout>
+          <ByBenefit />
+        </DashboardLayout>
+      </Route>
       <Route path="/sponsor/:id">
         <DashboardLayout>
           <SponsorDetail />
@@ -63,6 +70,13 @@ export default function App() {
         <DashboardLayout>
           <AdminRoute>
             <SponsorsAdmin />
+          </AdminRoute>
+        </DashboardLayout>
+      </Route>
+      <Route path="/matches-admin">
+        <DashboardLayout>
+          <AdminRoute>
+            <MatchesAdmin />
           </AdminRoute>
         </DashboardLayout>
       </Route>

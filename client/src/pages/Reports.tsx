@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { TIER_LABELS, TIER_COLORS } from "@/lib/constants";
+import { colorForText } from "@/lib/constants";
 import {
   Dialog,
   DialogContent,
@@ -95,8 +95,8 @@ export default function Reports() {
                   )}
                 >
                   <span className="truncate">{s.name}</span>
-                  <Badge className={cn(sponsorId === s.id ? "" : TIER_COLORS[s.tier])} variant="outline">
-                    {TIER_LABELS[s.tier]}
+                  <Badge className={cn(sponsorId === s.id ? "" : colorForText(s.tier))} variant="outline">
+                    {s.tier}
                   </Badge>
                 </button>
               ))}

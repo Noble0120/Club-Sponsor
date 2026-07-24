@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Upload } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { fileToBase64, MAX_FILE_SIZE } from "@/lib/upload";
+import { FileDropUpload } from "@/components/FileDropUpload";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -111,8 +111,7 @@ function CompleteTaskDialog({
     onError: (err) => toast.error(err.message || "操作失败"),
   });
 
-  async function handleFileSelect(files: FileList | null) {
-    if (!files) return;
+  async function handleFileSelect(files: FileList | File[]) {
     for (const file of Array.from(files)) {
       if (file.size > MAX_FILE_SIZE) {
         toast.error(`文件 ${file.name} 超过 16MB 限制`);
@@ -149,18 +148,13 @@ function CompleteTaskDialog({
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
-          <div className="flex flex-wrap items-center gap-2">
-            {fileUrls.map((url, idx) => (
-              <a key={idx} href={url} target="_blank" rel="noreferrer" className="text-xs text-primary underline">
-                附件 {idx + 1}
-              </a>
-            ))}
-            <label className="flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent">
-              {uploadMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-              {task?.step?.requiresFile ? "上传文件（必填）" : "上传文件"}
-              <input type="file" className="hidden" multiple onChange={(e) => handleFileSelect(e.target.files)} />
-            </label>
-          </div>
+          <FileDropUpload
+            urls={fileUrls}
+            onFiles={handleFileSelect}
+            onRemove={(idx) => setFileUrls((prev) => prev.filter((_, i) => i !== idx))}
+            isUploading={uploadMutation.isPending}
+            label={task?.step?.requiresFile ? "点击选择文件，或拖到这里（必填）" : "点击选择文件，或拖到这里"}
+          />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>

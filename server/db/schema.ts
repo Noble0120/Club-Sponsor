@@ -47,20 +47,12 @@ export const matches = mysqlTable("matches", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-export const sponsorTierEnum = [
-  "title",
-  "exclusive_premier",
-  "exclusive_premium",
-  "gold",
-  "official",
-  "supplier",
-] as const;
-
+// Free text so each club can define its own sponsorship tier names.
 export const sponsors = mysqlTable("sponsors", {
   id: int("id").autoincrement().primaryKey(),
   clubId: int("club_id").notNull(),
   name: varchar("name", { length: 100 }).notNull(),
-  tier: mysqlEnum("tier", sponsorTierEnum).notNull(),
+  tier: varchar("tier", { length: 100 }).notNull(),
   logoUrl: text("logo_url"),
   contactName: varchar("contact_name", { length: 100 }),
   contactPhone: varchar("contact_phone", { length: 50 }),
@@ -71,26 +63,41 @@ export const sponsors = mysqlTable("sponsors", {
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
 
-export const benefitCategoryEnum = [
-  "ad_exposure",
-  "ticketing",
-  "content",
-  "media",
-  "activity",
-  "ip_license",
-  "product",
+// How a benefit's fulfillment is measured/tracked over the season:
+// QUANTITY   - cumulative count toward a target (e.g. 4 LED videos delivered across matches)
+// MATCH      - checked individually for every applicable match
+// ROUND      - checked individually per league round (treated like MATCH since this system
+//              only tracks home matches, so round <-> match is effectively 1:1)
+// EVENT      - cumulative count of planned activities/events (same math as QUANTITY)
+// ONE_TIME   - a single approved fulfillment, ever, marks it done permanently
+// CONTINUOUS - considered satisfied while today is within [startDate, endDate] and no
+//              approved check-in has reported an interruption
+export const fulfillmentModeEnum = [
+  "QUANTITY",
+  "MATCH",
+  "ROUND",
+  "EVENT",
+  "ONE_TIME",
+  "CONTINUOUS",
 ] as const;
 
 export const benefitItems = mysqlTable("benefit_items", {
   id: int("id").autoincrement().primaryKey(),
   sponsorId: int("sponsor_id").notNull(),
+  code: varchar("code", { length: 50 }),
   name: varchar("name", { length: 300 }).notNull(),
   description: text("description"),
-  itemType: mysqlEnum("item_type", ["per_match", "season"]).notNull().default("per_match"),
-  totalCount: int("total_count"),
+  fulfillmentMode: mysqlEnum("fulfillment_mode", fulfillmentModeEnum).notNull().default("MATCH"),
+  targetCount: int("target_count"),
   countUnit: varchar("count_unit", { length: 20 }),
-  category: mysqlEnum("category", benefitCategoryEnum).notNull().default("ad_exposure"),
-  categoryLabel: varchar("category_label", { length: 100 }),
+  category: varchar("category", { length: 100 }).notNull().default(""),
+  startDate: timestamp("start_date"),
+  endDate: timestamp("end_date"),
+  scope: text("scope"),
+  attachmentRequirement: text("attachment_requirement"),
+  requiresApproval: boolean("requires_approval").notNull().default(false),
+  assigneeId: int("assignee_id"),
+  contractNote: text("contract_note"),
   sortOrder: int("sort_order").notNull().default(0),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -118,6 +125,13 @@ export const benefitCheckItems = mysqlTable("benefit_check_items", {
   note: text("note"),
   completedCount: int("completed_count"),
   attachmentUrls: text("attachment_urls"),
+  // Only "approved" check-ins count toward a benefit item's official completion progress.
+  // Items with requiresApproval=false are auto-approved on submit.
+  reviewStatus: mysqlEnum("review_status", ["pending", "approved", "rejected"])
+    .notNull()
+    .default("approved"),
+  reviewedBy: int("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
