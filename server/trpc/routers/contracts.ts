@@ -3,8 +3,8 @@ import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
 import { db } from "../../db";
-import { companyContracts, contractPayments, companies, assets } from "../../db/schema";
-import { uploadBase64File } from "../../lib/s3";
+import { companyContracts, contractPayments, companies, assets, clubs, users } from "../../db/schema";
+import { uploadBase64File, getContractDownloadUrl } from "../../lib/s3";
 import { extractTextFromPdf } from "../../lib/pdf";
 
 async function assertCompanyInClub(companyId: number, clubId: number) {
@@ -23,14 +23,39 @@ async function assertContractInClub(contractId: number, clubId: number) {
     .from(companyContracts)
     .where(eq(companyContracts.id, contractId))
     .limit(1);
-  if (!contract) throw new TRPCError({ code: "NOT_FOUND", message: "合同不存在" });
-  await assertCompanyInClub(contract.companyId, clubId);
+  if (!contract || contract.clubId !== clubId) throw new TRPCError({ code: "NOT_FOUND", message: "合同不存在" });
   return contract;
 }
 
 const EXPIRING_SOON_DAYS = 90;
 
 export const contractsRouter = router({
+  // All contracts in the club, regardless of company assignment — powers the standalone
+  // Contracts page. Season filtering happens client-side (small per-club dataset).
+  list: protectedProcedure.query(async ({ ctx }) => {
+    const clubId = ctx.user.clubId;
+    if (!clubId) return [];
+
+    const rows = await db
+      .select()
+      .from(companyContracts)
+      .where(eq(companyContracts.clubId, clubId))
+      .orderBy(desc(companyContracts.createdAt));
+
+    const companyIds = [...new Set(rows.map((r) => r.companyId).filter((id): id is number => id != null))];
+    const uploaderIds = [...new Set(rows.map((r) => r.uploadedBy))];
+    const [companyRows, uploaderRows] = await Promise.all([
+      companyIds.length > 0 ? db.select().from(companies).where(inArray(companies.id, companyIds)) : [],
+      uploaderIds.length > 0 ? db.select().from(users).where(inArray(users.id, uploaderIds)) : [],
+    ]);
+
+    return rows.map(({ extractedText: _extractedText, ...contract }) => ({
+      ...contract,
+      company: contract.companyId ? (companyRows.find((c) => c.id === contract.companyId) ?? null) : null,
+      uploader: uploaderRows.find((u) => u.id === contract.uploadedBy) ?? null,
+    }));
+  }),
+
   byCompany: protectedProcedure
     .input(z.object({ companyId: z.number() }))
     .query(async ({ ctx, input }) => {
@@ -47,32 +72,44 @@ export const contractsRouter = router({
   upload: adminProcedure
     .input(
       z.object({
-        companyId: z.number(),
+        companyId: z.number().optional(),
+        season: z.string().optional(),
         base64: z.string().min(1),
         mimeType: z.string().min(1),
         filename: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await assertCompanyInClub(input.companyId, ctx.user.clubId!);
+      const clubId = ctx.user.clubId!;
+      if (input.companyId) await assertCompanyInClub(input.companyId, clubId);
+
+      const buffer = Buffer.from(input.base64.replace(/^data:.*;base64,/, ""), "base64");
       const { url, fileKey } = await uploadBase64File(input.base64, input.mimeType, ctx.user.id, input.filename);
 
       let extractedText: string | undefined;
       if (input.mimeType === "application/pdf") {
         try {
-          const buffer = Buffer.from(input.base64.replace(/^data:.*;base64,/, ""), "base64");
           extractedText = await extractTextFromPdf(buffer);
         } catch {
           extractedText = undefined;
         }
       }
 
+      let season = input.season;
+      if (!season) {
+        const [club] = await db.select().from(clubs).where(eq(clubs.id, clubId)).limit(1);
+        season = club?.season ?? String(new Date().getFullYear());
+      }
+
       const [result] = await db.insert(companyContracts).values({
+        clubId,
         companyId: input.companyId,
+        season,
         url,
         fileKey,
         filename: input.filename,
         mimeType: input.mimeType,
+        fileSize: buffer.length,
         extractedText,
         uploadedBy: ctx.user.id,
       });
@@ -89,6 +126,8 @@ export const contractsRouter = router({
     .input(
       z.object({
         id: z.number(),
+        companyId: z.number().nullable().optional(),
+        season: z.string().optional(),
         amount: z.number().optional(),
         signedDate: z.coerce.date().optional(),
         startDate: z.coerce.date().optional(),
@@ -96,9 +135,13 @@ export const contractsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { id, ...rest } = input;
+      const { id, companyId, ...rest } = input;
       await assertContractInClub(id, ctx.user.clubId!);
-      await db.update(companyContracts).set(rest).where(eq(companyContracts.id, id));
+      if (companyId) await assertCompanyInClub(companyId, ctx.user.clubId!);
+      await db
+        .update(companyContracts)
+        .set({ ...rest, ...(companyId !== undefined ? { companyId } : {}) })
+        .where(eq(companyContracts.id, id));
       const [contract] = await db
         .select()
         .from(companyContracts)
@@ -118,13 +161,18 @@ export const contractsRouter = router({
       return { success: true };
     }),
 
+  getDownloadUrl: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const contract = await assertContractInClub(input.id, ctx.user.clubId!);
+      const url = await getContractDownloadUrl(contract.fileKey, contract.filename || `contract-${contract.id}.pdf`);
+      return { url };
+    }),
+
   // Contracts whose term ends within the next 90 days, for a renewal-reminder widget.
   expiringSoon: protectedProcedure.query(async ({ ctx }) => {
     const clubId = ctx.user.clubId;
     if (!clubId) return [];
-    const clubCompanies = await db.select().from(companies).where(eq(companies.clubId, clubId));
-    const companyIds = clubCompanies.map((c) => c.id);
-    if (companyIds.length === 0) return [];
 
     const now = new Date();
     const horizon = new Date(now.getTime() + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000);
@@ -134,17 +182,22 @@ export const contractsRouter = router({
       .from(companyContracts)
       .where(
         and(
-          inArray(companyContracts.companyId, companyIds),
+          eq(companyContracts.clubId, clubId),
           gte(companyContracts.endDate, now),
           lte(companyContracts.endDate, horizon),
         ),
       )
       .orderBy(asc(companyContracts.endDate));
 
-    return contracts.map(({ extractedText: _extractedText, ...contract }) => ({
-      ...contract,
-      company: clubCompanies.find((c) => c.id === contract.companyId)!,
-    }));
+    const companyIds = [...new Set(contracts.map((c) => c.companyId).filter((id): id is number => id != null))];
+    const companyRows = companyIds.length > 0 ? await db.select().from(companies).where(inArray(companies.id, companyIds)) : [];
+
+    return contracts
+      .filter((c) => c.companyId != null)
+      .map(({ extractedText: _extractedText, ...contract }) => ({
+        ...contract,
+        company: companyRows.find((c) => c.id === contract.companyId)!,
+      }));
   }),
 
   payments: router({

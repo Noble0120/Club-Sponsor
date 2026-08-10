@@ -8,6 +8,7 @@ import {
   Settings,
   Users,
   FileText,
+  FileSignature,
   Trophy,
   ChevronsLeft,
   ChevronsRight,
@@ -37,6 +38,7 @@ const MAIN_NAV: NavItem[] = [
 
 const ADMIN_NAV: NavItem[] = [
   { label: "赞助商管理", path: "/companies-admin", icon: Settings },
+  { label: "合同", path: "/contracts", icon: FileSignature },
   { label: "赛程管理", path: "/matches-admin", icon: CalendarDays },
   { label: "用户管理", path: "/user-management", icon: Users },
   { label: "履约报告", path: "/reports", icon: FileText },

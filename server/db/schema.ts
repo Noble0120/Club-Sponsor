@@ -88,13 +88,19 @@ export const companyActivities = mysqlTable("company_activities", {
 // Stores the club's sponsorship contract documents (PDFs) as a permanent repository, and
 // the commercial terms (amount, term dates) the business department tracks. AI scanning
 // reads `extractedText` to auto-generate Assets — see lib/assetExtraction.ts.
+// A contract can be uploaded before it's linked to a company (companyId nullable, matches
+// the "upload first, assign later" flow on the Contracts page), so clubId is stored directly
+// here rather than only reachable by joining through companies.
 export const companyContracts = mysqlTable("company_contracts", {
   id: int("id").autoincrement().primaryKey(),
-  companyId: int("company_id").notNull(),
+  clubId: int("club_id").notNull(),
+  companyId: int("company_id"),
+  season: varchar("season", { length: 20 }).notNull(),
   url: text("url").notNull(),
   fileKey: varchar("file_key", { length: 500 }).notNull(),
   filename: varchar("filename", { length: 255 }),
   mimeType: varchar("mime_type", { length: 100 }),
+  fileSize: int("file_size"),
   extractedText: longtext("extracted_text"),
   amount: decimal("amount", { precision: 14, scale: 2, mode: "number" }),
   signedDate: timestamp("signed_date"),

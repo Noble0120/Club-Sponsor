@@ -8,6 +8,7 @@ import Planning from "@/pages/Planning";
 import Tasks from "@/pages/Tasks";
 import CompanyDetail from "@/pages/CompanyDetail";
 import CompaniesAdmin from "@/pages/CompaniesAdmin";
+import Contracts from "@/pages/Contracts";
 import UserManagement from "@/pages/UserManagement";
 import Reports from "@/pages/Reports";
 import MatchesAdmin from "@/pages/MatchesAdmin";
@@ -57,6 +58,13 @@ export default function App() {
         <DashboardLayout>
           <AdminRoute>
             <MatchesAdmin />
+          </AdminRoute>
+        </DashboardLayout>
+      </Route>
+      <Route path="/contracts">
+        <DashboardLayout>
+          <AdminRoute>
+            <Contracts />
           </AdminRoute>
         </DashboardLayout>
       </Route>

@@ -1,4 +1,5 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { nanoid } from "nanoid";
 
 const REGION = process.env.AWS_REGION;
@@ -45,4 +46,24 @@ export async function uploadBase64File(
 
   const url = `https://${BUCKET_NAME}.s3.${REGION}.amazonaws.com/${fileKey}`;
   return { url, fileKey };
+}
+
+// The public object URL has no Content-Disposition header, so a plain `<a download>` gets
+// ignored cross-origin and the browser just opens the PDF again instead of downloading it.
+// A presigned URL with ResponseContentDisposition forces a real download on navigation,
+// regardless of origin, without changing how the object serves for inline preview.
+export async function getContractDownloadUrl(fileKey: string, filename: string): Promise<string> {
+  if (!BUCKET_NAME) {
+    throw new Error("S3_BUCKET_NAME environment variable is required");
+  }
+  const safeFilename = filename.replace(/["\\]/g, "");
+  return getSignedUrl(
+    s3Client,
+    new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: fileKey,
+      ResponseContentDisposition: `attachment; filename="${safeFilename}"`,
+    }),
+    { expiresIn: 300 },
+  );
 }

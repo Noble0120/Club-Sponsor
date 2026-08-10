@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { toast } from "sonner";
 import {
   ChevronDown,
@@ -8,11 +9,9 @@ import {
   Trash2,
   Sparkles,
   FileText,
-  Upload,
   Loader2,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
-import { fileToBase64 } from "@/lib/upload";
 import { parseSpreadsheet, excelCell } from "@/lib/excel";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -125,7 +124,7 @@ export default function CompaniesAdmin() {
             {expandedId === company.id && (
               <CardContent className="space-y-6 border-t pt-4">
                 <ActivitiesManager companyId={company.id} />
-                <ContractsManager companyId={company.id} />
+                <ContractsSummaryLink companyId={company.id} />
                 <AssetsManager companyId={company.id} companyName={company.name} />
               </CardContent>
             )}
@@ -354,276 +353,17 @@ function ActivitiesManager({ companyId }: { companyId: number }) {
   );
 }
 
-const EXPIRING_SOON_MS = 90 * 24 * 60 * 60 * 1000;
-
-function ContractsManager({ companyId }: { companyId: number }) {
-  const utils = trpc.useUtils();
+function ContractsSummaryLink({ companyId }: { companyId: number }) {
   const { data: contracts } = trpc.contracts.byCompany.useQuery({ companyId });
-  const [expandedContractId, setExpandedContractId] = useState<number | null>(null);
-  const uploadMutation = trpc.contracts.upload.useMutation({
-    onSuccess: () => {
-      toast.success("合同已上传");
-      utils.contracts.byCompany.invalidate({ companyId });
-    },
-    onError: (e) => toast.error(e.message),
-  });
-  const deleteMutation = trpc.contracts.delete.useMutation({
-    onSuccess: () => {
-      toast.success("已删除");
-      utils.contracts.byCompany.invalidate({ companyId });
-    },
-  });
-
-  async function handleUpload(file: File | undefined) {
-    if (!file) return;
-    const base64 = await fileToBase64(file);
-    await uploadMutation.mutateAsync({ companyId, base64, mimeType: file.type, filename: file.name });
-  }
-
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">合同文件</h3>
-        <label className="flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent">
-          {uploadMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-          上传合同（PDF）
-          <input
-            type="file"
-            accept="application/pdf"
-            className="hidden"
-            onChange={(e) => handleUpload(e.target.files?.[0])}
-          />
-        </label>
-      </div>
-      <div className="space-y-2">
-        {contracts?.map((c) => {
-          const endDate = c.endDate ? new Date(c.endDate) : null;
-          const isExpiringSoon = endDate && endDate.getTime() - Date.now() < EXPIRING_SOON_MS && endDate.getTime() > Date.now();
-          const isExpired = endDate && endDate.getTime() < Date.now();
-          return (
-            <div key={c.id} className="rounded-md border text-sm">
-              <button
-                className="flex w-full items-center gap-2 p-2 text-left"
-                onClick={() => setExpandedContractId(expandedContractId === c.id ? null : c.id)}
-              >
-                {expandedContractId === c.id ? (
-                  <ChevronDown className="h-4 w-4 flex-shrink-0" />
-                ) : (
-                  <ChevronRight className="h-4 w-4 flex-shrink-0" />
-                )}
-                <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                <a
-                  href={c.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="flex-1 truncate text-primary underline"
-                >
-                  {c.filename || "合同文件"}
-                </a>
-                {c.amount != null && <span className="text-xs text-muted-foreground">￥{c.amount.toLocaleString()}</span>}
-                {endDate && (
-                  <Badge variant={isExpired ? "secondary" : isExpiringSoon ? "destructive" : "outline"}>
-                    {isExpired ? "已到期" : isExpiringSoon ? "即将到期" : "有效期"}至 {endDate.toLocaleDateString()}
-                  </Badge>
-                )}
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteMutation.mutate({ id: c.id });
-                  }}
-                >
-                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                </Button>
-              </button>
-              {expandedContractId === c.id && (
-                <div className="space-y-4 border-t p-3">
-                  <ContractCommercialForm contract={c} companyId={companyId} />
-                  <ContractPaymentsManager contractId={c.id} />
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {contracts?.length === 0 && <p className="text-sm text-muted-foreground">暂无合同文件</p>}
-      </div>
-    </div>
-  );
-}
-
-interface ContractCommercial {
-  id: number;
-  amount: number | null;
-  signedDate: string | Date | null;
-  startDate: string | Date | null;
-  endDate: string | Date | null;
-}
-
-function ContractCommercialForm({ contract, companyId }: { contract: ContractCommercial; companyId: number }) {
-  const utils = trpc.useUtils();
-  const [amount, setAmount] = useState(contract.amount != null ? String(contract.amount) : "");
-  const [signedDate, setSignedDate] = useState(toDateInputValue(contract.signedDate));
-  const [startDate, setStartDate] = useState(toDateInputValue(contract.startDate));
-  const [endDate, setEndDate] = useState(toDateInputValue(contract.endDate));
-
-  const update = trpc.contracts.update.useMutation({
-    onSuccess: () => {
-      toast.success("已保存");
-      utils.contracts.byCompany.invalidate({ companyId });
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  return (
-    <div className="space-y-2">
-      <h4 className="text-xs font-medium text-muted-foreground">合同商务信息</h4>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label>合同金额（可选）</Label>
-          <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="元" />
-        </div>
-        <div className="space-y-1.5">
-          <Label>签订日期（可选）</Label>
-          <Input type="date" value={signedDate} onChange={(e) => setSignedDate(e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>合同起始日期（可选）</Label>
-          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>合同结束日期（可选）</Label>
-          <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-        </div>
-      </div>
-      <Button
-        size="sm"
-        onClick={() =>
-          update.mutate({
-            id: contract.id,
-            amount: amount ? Number(amount) : undefined,
-            signedDate: signedDate ? new Date(signedDate) : undefined,
-            startDate: startDate ? new Date(startDate) : undefined,
-            endDate: endDate ? new Date(endDate) : undefined,
-          })
-        }
-        disabled={update.isPending}
-      >
-        保存商务信息
-      </Button>
-    </div>
-  );
-}
-
-function ContractPaymentsManager({ contractId }: { contractId: number }) {
-  const utils = trpc.useUtils();
-  const { data: payments } = trpc.contracts.payments.byContract.useQuery({ contractId });
-  const [dueDate, setDueDate] = useState("");
-  const [amount, setAmount] = useState("");
-  const [note, setNote] = useState("");
-
-  const create = trpc.contracts.payments.create.useMutation({
-    onSuccess: () => {
-      setDueDate("");
-      setAmount("");
-      setNote("");
-      utils.contracts.payments.byContract.invalidate({ contractId });
-    },
-    onError: (e) => toast.error(e.message),
-  });
-  const update = trpc.contracts.payments.update.useMutation({
-    onSuccess: () => utils.contracts.payments.byContract.invalidate({ contractId }),
-  });
-  const deleteMutation = trpc.contracts.payments.delete.useMutation({
-    onSuccess: () => utils.contracts.payments.byContract.invalidate({ contractId }),
-  });
-
-  const totalAmount = payments?.reduce((sum, p) => sum + p.amount, 0) ?? 0;
-  const paidAmount = payments?.filter((p) => p.status === "paid").reduce((sum, p) => sum + p.amount, 0) ?? 0;
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h4 className="text-xs font-medium text-muted-foreground">回款计划</h4>
-        {payments && payments.length > 0 && (
-          <span className="text-xs text-muted-foreground">
-            已回款 {paidAmount.toLocaleString()} / {totalAmount.toLocaleString()}
-          </span>
-        )}
-      </div>
-      <div className="space-y-1.5">
-        {payments?.map((p) => {
-          const isOverdue = p.status === "pending" && p.dueDate && new Date(p.dueDate).getTime() < Date.now();
-          return (
-            <div key={p.id} className="flex items-center gap-2 rounded-md border p-2 text-xs">
-              <span className="flex-1">
-                {p.dueDate ? new Date(p.dueDate).toLocaleDateString() : "无到期日"} · ￥{p.amount.toLocaleString()}
-                {p.note ? ` · ${p.note}` : ""}
-              </span>
-              {isOverdue && <Badge variant="destructive">已逾期</Badge>}
-              <Badge
-                className={p.status === "paid" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}
-                onClick={() =>
-                  update.mutate({
-                    id: p.id,
-                    status: p.status === "paid" ? "pending" : "paid",
-                    paidDate: p.status === "paid" ? undefined : new Date(),
-                  })
-                }
-                style={{ cursor: "pointer" }}
-              >
-                {p.status === "paid" ? "已回款" : "标记为已回款"}
-              </Badge>
-              <button
-                className="text-muted-foreground hover:text-destructive"
-                onClick={() => deleteMutation.mutate({ id: p.id })}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          );
-        })}
-        {payments?.length === 0 && <p className="text-xs text-muted-foreground">暂无回款计划</p>}
-      </div>
-      <div className="flex items-end gap-2">
-        <div className="space-y-1">
-          <Label className="text-xs">到期日</Label>
-          <Input type="date" className="h-8" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">金额</Label>
-          <Input
-            type="number"
-            className="h-8 w-24"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="元"
-          />
-        </div>
-        <div className="flex-1 space-y-1">
-          <Label className="text-xs">备注</Label>
-          <Input className="h-8" value={note} onChange={(e) => setNote(e.target.value)} placeholder="如：首付款" />
-        </div>
-        <Button
-          size="sm"
-          onClick={() => {
-            if (!amount) {
-              toast.error("请填写金额");
-              return;
-            }
-            create.mutate({
-              contractId,
-              dueDate: dueDate ? new Date(dueDate) : undefined,
-              amount: Number(amount),
-              note: note || undefined,
-            });
-          }}
-          disabled={create.isPending}
-        >
-          添加
-        </Button>
-      </div>
+    <div className="flex items-center justify-between rounded-md border p-2 text-sm">
+      <span className="text-muted-foreground">
+        <FileText className="mr-1.5 inline h-3.5 w-3.5" />
+        {contracts?.length ?? 0} 份合同
+      </span>
+      <Link href={`/contracts?company=${companyId}`} className="text-primary hover:underline">
+        查看合同 →
+      </Link>
     </div>
   );
 }
