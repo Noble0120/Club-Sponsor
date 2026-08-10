@@ -3,15 +3,15 @@ import { authRouter } from "./auth";
 import { clubsRouter } from "./clubs";
 import { userManagementRouter } from "./userManagement";
 import { matchesRouter } from "./matches";
-import { sponsorsRouter } from "./sponsors";
-import { sponsorActivitiesRouter } from "./sponsorActivities";
+import { companiesRouter } from "./companies";
+import { companyActivitiesRouter } from "./companyActivities";
 import { contractsRouter } from "./contracts";
-import { benefitsRouter } from "./benefits";
-import { recordsRouter } from "./records";
+import { assetsRouter } from "./assets";
+import { deliveriesRouter } from "./deliveries";
+import { tasksRouter } from "./tasks";
 import { uploadRouter } from "./upload";
 import { dashboardRouter } from "./dashboard";
 import { reportsRouter } from "./reports";
-import { workflowRouter } from "./workflow";
 import { systemRouter } from "./system";
 
 export const appRouter = router({
@@ -19,15 +19,15 @@ export const appRouter = router({
   clubs: clubsRouter,
   userManagement: userManagementRouter,
   matches: matchesRouter,
-  sponsors: sponsorsRouter,
-  sponsorActivities: sponsorActivitiesRouter,
+  companies: companiesRouter,
+  companyActivities: companyActivitiesRouter,
   contracts: contractsRouter,
-  benefits: benefitsRouter,
-  records: recordsRouter,
+  assets: assetsRouter,
+  deliveries: deliveriesRouter,
+  tasks: tasksRouter,
   upload: uploadRouter,
   dashboard: dashboardRouter,
   reports: reportsRouter,
-  workflow: workflowRouter,
   system: systemRouter,
 });
 

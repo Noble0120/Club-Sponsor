@@ -1,7 +1,10 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lte } from "drizzle-orm";
 import { router, protectedProcedure } from "../trpc";
 import { db } from "../../db";
-import { acceptanceRecords, matches, sponsors } from "../../db/schema";
+import { assets, companies, companyContracts, deliveries, deliveryTasks, matches } from "../../db/schema";
+
+const EXPIRING_SOON_DAYS = 90;
+const STALE_TASK_DAYS = 7;
 
 export const dashboardRouter = router({
   stats: protectedProcedure.query(async ({ ctx }) => {
@@ -10,65 +13,89 @@ export const dashboardRouter = router({
       return {
         totalMatches: 0,
         homeMatches: 0,
-        totalSponsors: 0,
-        totalRecords: 0,
-        completedRecords: 0,
-        issueRecords: 0,
+        totalCompanies: 0,
+        totalDeliveries: 0,
+        deliveredCount: 0,
+        issueCount: 0,
         completionRate: 0,
       };
     }
 
     const clubMatches = await db.select().from(matches).where(eq(matches.clubId, clubId));
-    const clubSponsors = await db
+    const clubCompanies = await db
       .select()
-      .from(sponsors)
-      .where(and(eq(sponsors.clubId, clubId), eq(sponsors.stage, "signed")));
+      .from(companies)
+      .where(and(eq(companies.clubId, clubId), eq(companies.stage, "signed")));
+    const companyIds = clubCompanies.map((c) => c.id);
 
-    const matchIds = clubMatches.map((m) => m.id);
-    const records =
-      matchIds.length > 0
-        ? await db.select().from(acceptanceRecords).where(inArray(acceptanceRecords.matchId, matchIds))
-        : [];
+    const clubAssets =
+      companyIds.length > 0 ? await db.select().from(assets).where(inArray(assets.companyId, companyIds)) : [];
+    const assetIds = clubAssets.map((a) => a.id);
+    const clubDeliveries =
+      assetIds.length > 0 ? await db.select().from(deliveries).where(inArray(deliveries.assetId, assetIds)) : [];
 
-    const totalPossible = clubMatches.length * clubSponsors.filter((s) => s.isActive).length;
-    const completedRecords = records.filter((r) => r.status === "completed").length;
-    const issueRecords = records.filter((r) => r.status === "issue").length;
+    const deliveredCount = clubDeliveries.filter((d) => d.status === "delivered").length;
+    const issueCount = clubDeliveries.filter((d) => d.status === "issue").length;
 
     return {
       totalMatches: clubMatches.length,
       homeMatches: clubMatches.filter((m) => m.isHome).length,
-      totalSponsors: clubSponsors.length,
-      totalRecords: records.length,
-      completedRecords,
-      issueRecords,
-      completionRate: totalPossible > 0 ? Math.round((completedRecords / totalPossible) * 1000) / 10 : 0,
+      totalCompanies: clubCompanies.length,
+      totalDeliveries: clubDeliveries.length,
+      deliveredCount,
+      issueCount,
+      completionRate:
+        clubDeliveries.length > 0 ? Math.round((deliveredCount / clubDeliveries.length) * 1000) / 10 : 0,
     };
   }),
 
-  sponsorProgress: protectedProcedure.query(async ({ ctx }) => {
+  // Rule-based "Suggestions" for the Home page — no LLM involved, just scans for things that
+  // need human attention: unscheduled rights, stale in-progress tasks, contracts expiring soon.
+  suggestions: protectedProcedure.query(async ({ ctx }) => {
     const clubId = ctx.user.clubId;
-    if (!clubId) return [];
+    if (!clubId) return { unscheduledCount: 0, staleTaskCount: 0, expiringContractCount: 0 };
 
-    const clubSponsors = await db
-      .select()
-      .from(sponsors)
-      .where(and(eq(sponsors.clubId, clubId), eq(sponsors.stage, "signed")));
-    const clubMatches = await db.select().from(matches).where(eq(matches.clubId, clubId));
-    const matchIds = clubMatches.map((m) => m.id);
-    const records =
-      matchIds.length > 0
-        ? await db.select().from(acceptanceRecords).where(inArray(acceptanceRecords.matchId, matchIds))
+    const clubCompanies = await db.select().from(companies).where(eq(companies.clubId, clubId));
+    const companyIds = clubCompanies.map((c) => c.id);
+    if (companyIds.length === 0) return { unscheduledCount: 0, staleTaskCount: 0, expiringContractCount: 0 };
+
+    const clubAssets = await db.select().from(assets).where(inArray(assets.companyId, companyIds));
+    const assetIds = clubAssets.map((a) => a.id);
+
+    const clubDeliveries =
+      assetIds.length > 0 ? await db.select().from(deliveries).where(inArray(deliveries.assetId, assetIds)) : [];
+    const unscheduledCount = clubDeliveries.filter((d) => d.status === "unscheduled").length;
+
+    const deliveryIds = clubDeliveries.map((d) => d.id);
+    const staleCutoff = new Date(Date.now() - STALE_TASK_DAYS * 24 * 60 * 60 * 1000);
+    const clubTasks =
+      deliveryIds.length > 0
+        ? await db
+            .select()
+            .from(deliveryTasks)
+            .where(
+              and(
+                inArray(deliveryTasks.deliveryId, deliveryIds),
+                eq(deliveryTasks.status, "in_progress"),
+                lte(deliveryTasks.updatedAt, staleCutoff),
+              ),
+            )
         : [];
 
-    return clubSponsors.map((sponsor) => {
-      const sponsorRecords = records.filter((r) => r.sponsorId === sponsor.id);
-      return {
-        sponsor,
-        filled: sponsorRecords.length,
-        total: clubMatches.length,
-        completedCount: sponsorRecords.filter((r) => r.status === "completed").length,
-        issueCount: sponsorRecords.filter((r) => r.status === "issue").length,
-      };
-    });
+    const now = new Date();
+    const horizon = new Date(now.getTime() + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000);
+    const contracts = await db
+      .select()
+      .from(companyContracts)
+      .where(inArray(companyContracts.companyId, companyIds));
+    const expiringContractCount = contracts.filter(
+      (c) => c.endDate && c.endDate.getTime() >= now.getTime() && c.endDate.getTime() <= horizon.getTime(),
+    ).length;
+
+    return {
+      unscheduledCount,
+      staleTaskCount: clubTasks.length,
+      expiringContractCount,
+    };
   }),
 });

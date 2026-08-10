@@ -50,16 +50,16 @@ export const matches = mysqlTable("matches", {
 });
 
 // Sales pipeline stage — lets the business department track leads and negotiations
-// alongside already-signed sponsors in the same list.
-export const sponsorStageEnum = ["lead", "negotiating", "signed", "lost"] as const;
+// alongside already-signed companies in the same list.
+export const companyStageEnum = ["lead", "negotiating", "signed", "lost"] as const;
 
 // Free text so each club can define its own sponsorship tier names.
-export const sponsors = mysqlTable("sponsors", {
+export const companies = mysqlTable("companies", {
   id: int("id").autoincrement().primaryKey(),
   clubId: int("club_id").notNull(),
   name: varchar("name", { length: 100 }).notNull(),
   tier: varchar("tier", { length: 100 }).notNull(),
-  stage: mysqlEnum("stage", sponsorStageEnum).notNull().default("signed"),
+  stage: mysqlEnum("stage", companyStageEnum).notNull().default("signed"),
   logoUrl: text("logo_url"),
   contactName: varchar("contact_name", { length: 100 }),
   contactPhone: varchar("contact_phone", { length: 50 }),
@@ -71,13 +71,13 @@ export const sponsors = mysqlTable("sponsors", {
 });
 
 // Follow-up log for the business/commercial department: visits, calls, meetings, etc. —
-// tracked for leads and negotiating prospects as well as already-signed sponsors.
-export const sponsorActivityTypeEnum = ["visit", "call", "email", "meeting", "other"] as const;
+// tracked for leads and negotiating prospects as well as already-signed companies.
+export const companyActivityTypeEnum = ["visit", "call", "email", "meeting", "other"] as const;
 
-export const sponsorActivities = mysqlTable("sponsor_activities", {
+export const companyActivities = mysqlTable("company_activities", {
   id: int("id").autoincrement().primaryKey(),
-  sponsorId: int("sponsor_id").notNull(),
-  type: mysqlEnum("type", sponsorActivityTypeEnum).notNull().default("other"),
+  companyId: int("company_id").notNull(),
+  type: mysqlEnum("type", companyActivityTypeEnum).notNull().default("other"),
   content: text("content").notNull(),
   contactPerson: varchar("contact_person", { length: 100 }),
   followUpDate: timestamp("follow_up_date"),
@@ -85,52 +85,12 @@ export const sponsorActivities = mysqlTable("sponsor_activities", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-// How a benefit's fulfillment is measured/tracked over the season:
-// QUANTITY   - cumulative count toward a target (e.g. 4 LED videos delivered across matches)
-// MATCH      - checked individually for every applicable match
-// ROUND      - checked individually per league round (treated like MATCH since this system
-//              only tracks home matches, so round <-> match is effectively 1:1)
-// EVENT      - cumulative count of planned activities/events (same math as QUANTITY)
-// ONE_TIME   - a single approved fulfillment, ever, marks it done permanently
-// CONTINUOUS - considered satisfied while today is within [startDate, endDate] and no
-//              approved check-in has reported an interruption
-export const fulfillmentModeEnum = [
-  "QUANTITY",
-  "MATCH",
-  "ROUND",
-  "EVENT",
-  "ONE_TIME",
-  "CONTINUOUS",
-] as const;
-
-export const benefitItems = mysqlTable("benefit_items", {
+// Stores the club's sponsorship contract documents (PDFs) as a permanent repository, and
+// the commercial terms (amount, term dates) the business department tracks. AI scanning
+// reads `extractedText` to auto-generate Assets — see lib/assetExtraction.ts.
+export const companyContracts = mysqlTable("company_contracts", {
   id: int("id").autoincrement().primaryKey(),
-  sponsorId: int("sponsor_id").notNull(),
-  code: varchar("code", { length: 50 }),
-  name: varchar("name", { length: 300 }).notNull(),
-  description: text("description"),
-  fulfillmentMode: mysqlEnum("fulfillment_mode", fulfillmentModeEnum).notNull().default("MATCH"),
-  targetCount: int("target_count"),
-  countUnit: varchar("count_unit", { length: 20 }),
-  category: varchar("category", { length: 100 }).notNull().default(""),
-  startDate: timestamp("start_date"),
-  endDate: timestamp("end_date"),
-  scope: text("scope"),
-  attachmentRequirement: text("attachment_requirement"),
-  requiresApproval: boolean("requires_approval").notNull().default(false),
-  assigneeId: int("assignee_id"),
-  contractNote: text("contract_note"),
-  sortOrder: int("sort_order").notNull().default(0),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
-
-// Stores the club's sponsor contract documents (PDFs) as a permanent repository, separate
-// from the transient AI extraction flow that reads them to auto-populate benefit_items.
-// Also carries the commercial terms (amount, term dates) the business department tracks.
-export const sponsorContracts = mysqlTable("sponsor_contracts", {
-  id: int("id").autoincrement().primaryKey(),
-  sponsorId: int("sponsor_id").notNull(),
+  companyId: int("company_id").notNull(),
   url: text("url").notNull(),
   fileKey: varchar("file_key", { length: 500 }).notNull(),
   filename: varchar("filename", { length: 255 }),
@@ -144,7 +104,7 @@ export const sponsorContracts = mysqlTable("sponsor_contracts", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-// A contract's payment/collection schedule (回款计划), tracked as installments.
+// A contract's payment/collection schedule, tracked as installments.
 export const contractPayments = mysqlTable("contract_payments", {
   id: int("id").autoincrement().primaryKey(),
   contractId: int("contract_id").notNull(),
@@ -158,30 +118,45 @@ export const contractPayments = mysqlTable("contract_payments", {
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
 
-export const acceptanceRecords = mysqlTable("acceptance_records", {
+// A reusable "kind" of sponsorship right — the inventory library. AI scanning a contract
+// creates these directly (no fulfillment-mode picker); how it gets scheduled is expressed by
+// `scope` (free text, e.g. "all home matches" or a specific date range) which the extraction/
+// scheduling logic uses to auto-generate Deliveries.
+export const assets = mysqlTable("assets", {
   id: int("id").autoincrement().primaryKey(),
-  matchId: int("match_id").notNull(),
-  sponsorId: int("sponsor_id").notNull(),
-  submittedBy: int("submitted_by").notNull(),
-  status: mysqlEnum("status", ["pending", "in_progress", "completed", "issue"])
-    .notNull()
-    .default("in_progress"),
-  overallRating: int("overall_rating"),
-  summary: text("summary"),
+  companyId: int("company_id").notNull(),
+  contractId: int("contract_id"),
+  code: varchar("code", { length: 50 }),
+  name: varchar("name", { length: 300 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 100 }).notNull().default(""),
+  targetCount: int("target_count"),
+  countUnit: varchar("count_unit", { length: 20 }),
+  scope: text("scope"),
+  startDate: timestamp("start_date"),
+  endDate: timestamp("end_date"),
+  attachmentRequirement: text("attachment_requirement"),
+  requiresApproval: boolean("requires_approval").notNull().default(false),
+  sortOrder: int("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
 
-export const benefitCheckItems = mysqlTable("benefit_check_items", {
+// A single scheduled (or not-yet-scheduled) instance of an Asset — the smallest unit shown
+// on the Home "Upcoming Deliveries" / "Unscheduled Rights" lists and on the Planning view.
+export const deliveryStatusEnum = ["unscheduled", "scheduled", "delivered", "issue"] as const;
+
+export const deliveries = mysqlTable("deliveries", {
   id: int("id").autoincrement().primaryKey(),
-  recordId: int("record_id").notNull(),
-  benefitItemId: int("benefit_item_id").notNull(),
-  fulfilled: mysqlEnum("fulfilled", ["yes", "no", "partial", "na"]).notNull().default("na"),
-  note: text("note"),
+  assetId: int("asset_id").notNull(),
+  matchId: int("match_id"),
+  scheduledDate: timestamp("scheduled_date"),
+  status: mysqlEnum("status", deliveryStatusEnum).notNull().default("unscheduled"),
   completedCount: int("completed_count"),
+  note: text("note"),
   attachmentUrls: text("attachment_urls"),
-  // Only "approved" check-ins count toward a benefit item's official completion progress.
-  // Items with requiresApproval=false are auto-approved on submit.
+  // Only "approved" deliveries count toward an asset's official completion progress.
+  // Deliveries whose asset has requiresApproval=false are auto-approved on submit.
   reviewStatus: mysqlEnum("review_status", ["pending", "approved", "rejected"])
     .notNull()
     .default("approved"),
@@ -191,84 +166,16 @@ export const benefitCheckItems = mysqlTable("benefit_check_items", {
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
 
-export const recordImages = mysqlTable("record_images", {
-  id: int("id").autoincrement().primaryKey(),
-  recordId: int("record_id").notNull(),
-  url: text("url").notNull(),
-  fileKey: varchar("file_key", { length: 500 }).notNull(),
-  filename: varchar("filename", { length: 255 }),
-  mimeType: varchar("mime_type", { length: 100 }),
-  sortOrder: int("sort_order").notNull().default(0),
-  uploadedBy: int("uploaded_by").notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+// Execution subtasks under a Delivery — auto-generated from the asset's category (e.g. a
+// media asset spawns "Setup" + "Final check") and managed on the Tasks kanban board.
+export const taskStatusEnum = ["todo", "in_progress", "done", "cancelled"] as const;
 
-export const reports = mysqlTable("reports", {
+export const deliveryTasks = mysqlTable("delivery_tasks", {
   id: int("id").autoincrement().primaryKey(),
-  type: mysqlEnum("type", ["sponsor", "season"]).notNull(),
-  sponsorId: int("sponsor_id"),
-  content: text("content").notNull(),
-  generatedBy: int("generated_by").notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
-
-export const reportShareTokens = mysqlTable("report_share_tokens", {
-  id: int("id").autoincrement().primaryKey(),
-  token: varchar("token", { length: 64 }).notNull().unique(),
-  sponsorId: int("sponsor_id").notNull(),
-  reportId: int("report_id"),
-  createdBy: int("created_by").notNull(),
-  expiresAt: timestamp("expires_at"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
-
-export const sopTemplates = mysqlTable("sop_templates", {
-  id: int("id").autoincrement().primaryKey(),
-  clubId: int("club_id").notNull(),
+  deliveryId: int("delivery_id").notNull(),
   name: varchar("name", { length: 200 }).notNull(),
-  description: text("description"),
-  isActive: boolean("is_active").notNull().default(true),
-  autoGenerateDaysBefore: int("auto_generate_days_before"),
-  createdBy: int("created_by").notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
-});
-
-export const sopSteps = mysqlTable("sop_steps", {
-  id: int("id").autoincrement().primaryKey(),
-  templateId: int("template_id").notNull(),
-  stepOrder: int("step_order").notNull(),
-  name: varchar("name", { length: 200 }).notNull(),
-  description: text("description"),
-  dueDayOffset: int("due_day_offset").notNull().default(-1),
-  requiresFile: boolean("requires_file").notNull().default(false),
-  requiresNote: boolean("requires_note").notNull().default(false),
-  defaultAssigneeId: int("default_assignee_id"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
-});
-
-export const workflowInstances = mysqlTable("workflow_instances", {
-  id: int("id").autoincrement().primaryKey(),
-  clubId: int("club_id").notNull(),
-  templateId: int("template_id").notNull(),
-  matchId: int("match_id").notNull(),
-  currentStepOrder: int("current_step_order").notNull().default(1),
-  status: mysqlEnum("status", ["active", "completed", "overdue"]).notNull().default("active"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
-});
-
-export const workflowStepExecutions = mysqlTable("workflow_step_executions", {
-  id: int("id").autoincrement().primaryKey(),
-  clubId: int("club_id").notNull(),
-  instanceId: int("instance_id").notNull(),
-  stepId: int("step_id").notNull(),
-  stepOrder: int("step_order").notNull(),
+  status: mysqlEnum("status", taskStatusEnum).notNull().default("todo"),
   assigneeId: int("assignee_id"),
-  status: mysqlEnum("status", ["pending", "active", "completed", "overdue"])
-    .notNull()
-    .default("pending"),
   dueDate: timestamp("due_date"),
   completedAt: timestamp("completed_at"),
   completedBy: int("completed_by"),
@@ -278,63 +185,66 @@ export const workflowStepExecutions = mysqlTable("workflow_step_executions", {
   updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
 });
 
+export const reports = mysqlTable("reports", {
+  id: int("id").autoincrement().primaryKey(),
+  type: mysqlEnum("type", ["company", "season"]).notNull(),
+  companyId: int("company_id"),
+  content: text("content").notNull(),
+  generatedBy: int("generated_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const reportShareTokens = mysqlTable("report_share_tokens", {
+  id: int("id").autoincrement().primaryKey(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  companyId: int("company_id").notNull(),
+  reportId: int("report_id"),
+  createdBy: int("created_by").notNull(),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Relations (used for convenient nested queries where helpful)
-export const sponsorsRelations = relations(sponsors, ({ many }) => ({
-  benefitItems: many(benefitItems),
+export const companiesRelations = relations(companies, ({ many }) => ({
+  assets: many(assets),
+  contracts: many(companyContracts),
+  activities: many(companyActivities),
 }));
 
-export const benefitItemsRelations = relations(benefitItems, ({ one }) => ({
-  sponsor: one(sponsors, { fields: [benefitItems.sponsorId], references: [sponsors.id] }),
+export const assetsRelations = relations(assets, ({ one, many }) => ({
+  company: one(companies, { fields: [assets.companyId], references: [companies.id] }),
+  contract: one(companyContracts, { fields: [assets.contractId], references: [companyContracts.id] }),
+  deliveries: many(deliveries),
 }));
 
-export const acceptanceRecordsRelations = relations(acceptanceRecords, ({ many }) => ({
-  checkItems: many(benefitCheckItems),
+export const companyContractsRelations = relations(companyContracts, ({ many }) => ({
+  payments: many(contractPayments),
+  assets: many(assets),
 }));
 
-export const benefitCheckItemsRelations = relations(benefitCheckItems, ({ one }) => ({
-  record: one(acceptanceRecords, {
-    fields: [benefitCheckItems.recordId],
-    references: [acceptanceRecords.id],
-  }),
-  benefitItem: one(benefitItems, {
-    fields: [benefitCheckItems.benefitItemId],
-    references: [benefitItems.id],
-  }),
+export const contractPaymentsRelations = relations(contractPayments, ({ one }) => ({
+  contract: one(companyContracts, { fields: [contractPayments.contractId], references: [companyContracts.id] }),
 }));
 
-export const sopTemplatesRelations = relations(sopTemplates, ({ many }) => ({
-  steps: many(sopSteps),
+export const deliveriesRelations = relations(deliveries, ({ one, many }) => ({
+  asset: one(assets, { fields: [deliveries.assetId], references: [assets.id] }),
+  match: one(matches, { fields: [deliveries.matchId], references: [matches.id] }),
+  tasks: many(deliveryTasks),
 }));
 
-export const sopStepsRelations = relations(sopSteps, ({ one }) => ({
-  template: one(sopTemplates, { fields: [sopSteps.templateId], references: [sopTemplates.id] }),
-}));
-
-export const workflowInstancesRelations = relations(workflowInstances, ({ many }) => ({
-  executions: many(workflowStepExecutions),
-}));
-
-export const workflowStepExecutionsRelations = relations(workflowStepExecutions, ({ one }) => ({
-  instance: one(workflowInstances, {
-    fields: [workflowStepExecutions.instanceId],
-    references: [workflowInstances.id],
-  }),
+export const deliveryTasksRelations = relations(deliveryTasks, ({ one }) => ({
+  delivery: one(deliveries, { fields: [deliveryTasks.deliveryId], references: [deliveries.id] }),
 }));
 
 export type Club = typeof clubs.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Match = typeof matches.$inferSelect;
-export type Sponsor = typeof sponsors.$inferSelect;
-export type SponsorActivity = typeof sponsorActivities.$inferSelect;
-export type SponsorContract = typeof sponsorContracts.$inferSelect;
+export type Company = typeof companies.$inferSelect;
+export type CompanyActivity = typeof companyActivities.$inferSelect;
+export type CompanyContract = typeof companyContracts.$inferSelect;
 export type ContractPayment = typeof contractPayments.$inferSelect;
-export type BenefitItem = typeof benefitItems.$inferSelect;
-export type AcceptanceRecord = typeof acceptanceRecords.$inferSelect;
-export type BenefitCheckItem = typeof benefitCheckItems.$inferSelect;
-export type RecordImage = typeof recordImages.$inferSelect;
+export type Asset = typeof assets.$inferSelect;
+export type Delivery = typeof deliveries.$inferSelect;
+export type DeliveryTask = typeof deliveryTasks.$inferSelect;
 export type Report = typeof reports.$inferSelect;
 export type ReportShareToken = typeof reportShareTokens.$inferSelect;
-export type SopTemplate = typeof sopTemplates.$inferSelect;
-export type SopStep = typeof sopSteps.$inferSelect;
-export type WorkflowInstance = typeof workflowInstances.$inferSelect;
-export type WorkflowStepExecution = typeof workflowStepExecutions.$inferSelect;

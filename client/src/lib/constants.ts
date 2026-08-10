@@ -1,4 +1,4 @@
-// Sponsor tier and benefit category are free text so each club can define their own —
+// Company tier and asset category are free text so each club can define their own —
 // colors are derived deterministically from the text instead of a fixed lookup table.
 const BADGE_PALETTE = [
   "bg-yellow-100 text-yellow-800 border border-yellow-300",
@@ -21,63 +21,17 @@ export function colorForText(text: string): string {
   return BADGE_PALETTE[Math.abs(hash) % BADGE_PALETTE.length];
 }
 
-export const FULFILLMENT_MODE_LABELS: Record<string, string> = {
-  QUANTITY: "数量累计型",
-  MATCH: "逐场型",
-  ROUND: "逐轮型",
-  EVENT: "活动次数型",
-  ONE_TIME: "一次性",
-  CONTINUOUS: "持续型",
-};
-
-export const FULFILLMENT_MODE_HINTS: Record<string, string> = {
-  QUANTITY: "全季累计完成一定数量(如4条视频),每场可填报本场新增数量",
-  MATCH: "每场比赛单独验收履约情况",
-  ROUND: "按联赛轮次单独验收(本系统按主场场次处理)",
-  EVENT: "全季累计完成一定次数的活动",
-  ONE_TIME: "只要有一次通过审核的履约记录即视为完成",
-  CONTINUOUS: "检查当前日期是否在有效期内,以及是否发生过中断",
-};
-
-export const STATUS_LABELS: Record<string, string> = {
-  pending: "待填写",
-  in_progress: "填写中",
-  completed: "已完成",
+export const DELIVERY_STATUS_LABELS: Record<string, string> = {
+  unscheduled: "未排期",
+  scheduled: "已排期",
+  delivered: "已交付",
   issue: "存在问题",
 };
 
-export const STATUS_COLORS: Record<string, string> = {
-  pending: "bg-gray-100 text-gray-600",
-  in_progress: "bg-blue-100 text-blue-700",
-  completed: "bg-green-100 text-green-700",
-  issue: "bg-red-100 text-red-700",
-};
-
-export const FULFILLED_LABELS: Record<string, string> = {
-  yes: "已履约",
-  no: "未履约",
-  partial: "部分履约",
-  na: "不适用",
-};
-
-export const FULFILLED_COLORS: Record<string, string> = {
-  yes: "bg-green-100 text-green-700",
-  no: "bg-red-100 text-red-700",
-  partial: "bg-yellow-100 text-yellow-700",
-  na: "bg-gray-100 text-gray-500",
-};
-
-export const PROGRESS_STATUS_LABELS: Record<string, string> = {
-  not_started: "未开始",
-  in_progress: "进行中",
-  completed: "已完成",
-  issue: "异常",
-};
-
-export const PROGRESS_STATUS_COLORS: Record<string, string> = {
-  not_started: "bg-gray-100 text-gray-600",
-  in_progress: "bg-blue-100 text-blue-700",
-  completed: "bg-green-100 text-green-700",
+export const DELIVERY_STATUS_COLORS: Record<string, string> = {
+  unscheduled: "bg-gray-100 text-gray-600",
+  scheduled: "bg-blue-100 text-blue-700",
+  delivered: "bg-green-100 text-green-700",
   issue: "bg-red-100 text-red-700",
 };
 
@@ -87,14 +41,41 @@ export const REVIEW_STATUS_LABELS: Record<string, string> = {
   rejected: "已驳回",
 };
 
-export const SPONSOR_STAGE_LABELS: Record<string, string> = {
+export const REVIEW_STATUS_COLORS: Record<string, string> = {
+  pending: "bg-yellow-100 text-yellow-700",
+  approved: "bg-green-100 text-green-700",
+  rejected: "bg-red-100 text-red-700",
+};
+
+export const TASK_STATUS_LABELS: Record<string, string> = {
+  todo: "待办",
+  in_progress: "进行中",
+  done: "已完成",
+  cancelled: "已取消",
+};
+
+export const TASK_STATUS_COLORS: Record<string, string> = {
+  todo: "bg-gray-100 text-gray-600",
+  in_progress: "bg-blue-100 text-blue-700",
+  done: "bg-green-100 text-green-700",
+  cancelled: "bg-gray-200 text-gray-500",
+};
+
+export const TASK_BOARD_COLUMNS: { status: string; label: string }[] = [
+  { status: "todo", label: "待办" },
+  { status: "in_progress", label: "进行中" },
+  { status: "done", label: "已完成" },
+  { status: "cancelled", label: "已取消" },
+];
+
+export const COMPANY_STAGE_LABELS: Record<string, string> = {
   lead: "潜在客户",
   negotiating: "洽谈中",
   signed: "已签约",
   lost: "已流失",
 };
 
-export const SPONSOR_STAGE_COLORS: Record<string, string> = {
+export const COMPANY_STAGE_COLORS: Record<string, string> = {
   lead: "bg-gray-100 text-gray-600",
   negotiating: "bg-blue-100 text-blue-700",
   signed: "bg-green-100 text-green-700",
@@ -109,8 +90,16 @@ export const ACTIVITY_TYPE_LABELS: Record<string, string> = {
   other: "其他",
 };
 
-export const REVIEW_STATUS_COLORS: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-700",
-  approved: "bg-green-100 text-green-700",
-  rejected: "bg-red-100 text-red-700",
+export const ASSET_PROGRESS_STATUS_LABELS: Record<string, string> = {
+  not_started: "未开始",
+  in_progress: "进行中",
+  completed: "已完成",
+  issue: "异常",
+};
+
+export const ASSET_PROGRESS_STATUS_COLORS: Record<string, string> = {
+  not_started: "bg-gray-100 text-gray-600",
+  in_progress: "bg-blue-100 text-blue-700",
+  completed: "bg-green-100 text-green-700",
+  issue: "bg-red-100 text-red-700",
 };

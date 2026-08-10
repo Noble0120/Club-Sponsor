@@ -26,8 +26,8 @@ import {
 } from "@/components/ui/select";
 
 export default function Reports() {
-  const { data: sponsors } = trpc.sponsors.list.useQuery({ stage: "signed" });
-  const [sponsorId, setSponsorId] = useState<number | null>(null);
+  const { data: companies } = trpc.companies.list.useQuery({ stage: "signed" });
+  const [companyId, setCompanyId] = useState<number | null>(null);
 
   const utils = trpc.useUtils();
   const { data: seasonReports } = trpc.reports.season.useQuery();
@@ -42,8 +42,8 @@ export default function Reports() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">验收报告</h1>
-        <p className="text-sm text-muted-foreground">生成 AI 权益验收报告并管理分享链接</p>
+        <h1 className="text-2xl font-semibold">履约报告</h1>
+        <p className="text-sm text-muted-foreground">生成 AI 权益履约报告并管理分享链接</p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[320px_1fr]">
@@ -85,18 +85,18 @@ export default function Reports() {
               <CardTitle className="text-base">赞助商</CardTitle>
             </CardHeader>
             <CardContent className="space-y-1">
-              {sponsors?.map((s) => (
+              {companies?.map((c) => (
                 <button
-                  key={s.id}
-                  onClick={() => setSponsorId(s.id)}
+                  key={c.id}
+                  onClick={() => setCompanyId(c.id)}
                   className={cn(
                     "flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors",
-                    sponsorId === s.id ? "bg-primary text-primary-foreground" : "hover:bg-accent",
+                    companyId === c.id ? "bg-primary text-primary-foreground" : "hover:bg-accent",
                   )}
                 >
-                  <span className="truncate">{s.name}</span>
-                  <Badge className={cn(sponsorId === s.id ? "" : colorForText(s.tier))} variant="outline">
-                    {s.tier}
+                  <span className="truncate">{c.name}</span>
+                  <Badge className={cn(companyId === c.id ? "" : colorForText(c.tier))} variant="outline">
+                    {c.tier}
                   </Badge>
                 </button>
               ))}
@@ -104,8 +104,8 @@ export default function Reports() {
           </Card>
         </div>
 
-        {sponsorId ? (
-          <SponsorReportPanel sponsorId={sponsorId} />
+        {companyId ? (
+          <CompanyReportPanel companyId={companyId} />
         ) : (
           <Card className="flex h-64 items-center justify-center">
             <p className="text-sm text-muted-foreground">请选择左侧赞助商查看报告</p>
@@ -116,17 +116,17 @@ export default function Reports() {
   );
 }
 
-function SponsorReportPanel({ sponsorId }: { sponsorId: number }) {
+function CompanyReportPanel({ companyId }: { companyId: number }) {
   const utils = trpc.useUtils();
-  const { data: sponsor } = trpc.sponsors.get.useQuery({ id: sponsorId });
-  const { data: reports } = trpc.reports.bySponsor.useQuery({ sponsorId });
-  const { data: shareLinks } = trpc.reports.listShareLinks.useQuery({ sponsorId });
+  const { data: company } = trpc.companies.get.useQuery({ id: companyId });
+  const { data: reports } = trpc.reports.byCompany.useQuery({ companyId });
+  const { data: shareLinks } = trpc.reports.listShareLinks.useQuery({ companyId });
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
 
-  const generateSponsor = trpc.reports.generateSponsor.useMutation({
+  const generateCompany = trpc.reports.generateCompany.useMutation({
     onSuccess: () => {
       toast.success("报告已生成");
-      utils.reports.bySponsor.invalidate({ sponsorId });
+      utils.reports.byCompany.invalidate({ companyId });
     },
     onError: (e) => toast.error(e.message),
   });
@@ -134,7 +134,7 @@ function SponsorReportPanel({ sponsorId }: { sponsorId: number }) {
   const deleteShareLink = trpc.reports.deleteShareLink.useMutation({
     onSuccess: () => {
       toast.success("已删除分享链接");
-      utils.reports.listShareLinks.invalidate({ sponsorId });
+      utils.reports.listShareLinks.invalidate({ companyId });
     },
   });
 
@@ -144,14 +144,14 @@ function SponsorReportPanel({ sponsorId }: { sponsorId: number }) {
     <div className="space-y-4">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-base">{sponsor?.name} · 权益验收报告</CardTitle>
+          <CardTitle className="text-base">{company?.name} · 权益履约报告</CardTitle>
           <div className="flex gap-2 no-print">
             <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="mr-1 h-4 w-4" />
               打印/导出PDF
             </Button>
-            <Button size="sm" onClick={() => generateSponsor.mutate({ sponsorId })} disabled={generateSponsor.isPending}>
-              {generateSponsor.isPending ? (
+            <Button size="sm" onClick={() => generateCompany.mutate({ companyId })} disabled={generateCompany.isPending}>
+              {generateCompany.isPending ? (
                 <>
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                   生成中...
@@ -220,13 +220,13 @@ function SponsorReportPanel({ sponsorId }: { sponsorId: number }) {
       </Card>
 
       <ShareLinkDialog
-        sponsorId={sponsorId}
+        companyId={companyId}
         reports={reports ?? []}
         open={shareDialogOpen}
         onClose={() => setShareDialogOpen(false)}
         onCreated={() => {
           setShareDialogOpen(false);
-          utils.reports.listShareLinks.invalidate({ sponsorId });
+          utils.reports.listShareLinks.invalidate({ companyId });
         }}
       />
     </div>
@@ -234,13 +234,13 @@ function SponsorReportPanel({ sponsorId }: { sponsorId: number }) {
 }
 
 function ShareLinkDialog({
-  sponsorId,
+  companyId,
   reports,
   open,
   onClose,
   onCreated,
 }: {
-  sponsorId: number;
+  companyId: number;
   reports: { id: number; createdAt: string | Date }[];
   open: boolean;
   onClose: () => void;
@@ -293,7 +293,7 @@ function ShareLinkDialog({
           <Button
             onClick={() =>
               create.mutate({
-                sponsorId,
+                companyId,
                 reportId: reportId ? Number(reportId) : undefined,
                 expiresInDays: expiresInDays ? Number(expiresInDays) : undefined,
               })

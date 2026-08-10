@@ -3,43 +3,43 @@ import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
 import { db } from "../../db";
-import { sponsorContracts, contractPayments, sponsors } from "../../db/schema";
+import { companyContracts, contractPayments, companies, assets } from "../../db/schema";
 import { uploadBase64File } from "../../lib/s3";
 import { extractTextFromPdf } from "../../lib/pdf";
 
-async function assertSponsorInClub(sponsorId: number, clubId: number) {
-  const [sponsor] = await db
+async function assertCompanyInClub(companyId: number, clubId: number) {
+  const [company] = await db
     .select()
-    .from(sponsors)
-    .where(and(eq(sponsors.id, sponsorId), eq(sponsors.clubId, clubId)))
+    .from(companies)
+    .where(and(eq(companies.id, companyId), eq(companies.clubId, clubId)))
     .limit(1);
-  if (!sponsor) throw new TRPCError({ code: "NOT_FOUND", message: "赞助商不存在" });
-  return sponsor;
+  if (!company) throw new TRPCError({ code: "NOT_FOUND", message: "赞助商不存在" });
+  return company;
 }
 
 async function assertContractInClub(contractId: number, clubId: number) {
   const [contract] = await db
     .select()
-    .from(sponsorContracts)
-    .where(eq(sponsorContracts.id, contractId))
+    .from(companyContracts)
+    .where(eq(companyContracts.id, contractId))
     .limit(1);
   if (!contract) throw new TRPCError({ code: "NOT_FOUND", message: "合同不存在" });
-  await assertSponsorInClub(contract.sponsorId, clubId);
+  await assertCompanyInClub(contract.companyId, clubId);
   return contract;
 }
 
 const EXPIRING_SOON_DAYS = 90;
 
 export const contractsRouter = router({
-  bySponsor: protectedProcedure
-    .input(z.object({ sponsorId: z.number() }))
+  byCompany: protectedProcedure
+    .input(z.object({ companyId: z.number() }))
     .query(async ({ ctx, input }) => {
-      await assertSponsorInClub(input.sponsorId, ctx.user.clubId!);
+      await assertCompanyInClub(input.companyId, ctx.user.clubId!);
       const rows = await db
         .select()
-        .from(sponsorContracts)
-        .where(eq(sponsorContracts.sponsorId, input.sponsorId))
-        .orderBy(desc(sponsorContracts.createdAt));
+        .from(companyContracts)
+        .where(eq(companyContracts.companyId, input.companyId))
+        .orderBy(desc(companyContracts.createdAt));
       // Extracted text can be large and isn't needed by the contract list UI.
       return rows.map(({ extractedText: _extractedText, ...rest }) => rest);
     }),
@@ -47,14 +47,14 @@ export const contractsRouter = router({
   upload: adminProcedure
     .input(
       z.object({
-        sponsorId: z.number(),
+        companyId: z.number(),
         base64: z.string().min(1),
         mimeType: z.string().min(1),
         filename: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await assertSponsorInClub(input.sponsorId, ctx.user.clubId!);
+      await assertCompanyInClub(input.companyId, ctx.user.clubId!);
       const { url, fileKey } = await uploadBase64File(input.base64, input.mimeType, ctx.user.id, input.filename);
 
       let extractedText: string | undefined;
@@ -67,8 +67,8 @@ export const contractsRouter = router({
         }
       }
 
-      const [result] = await db.insert(sponsorContracts).values({
-        sponsorId: input.sponsorId,
+      const [result] = await db.insert(companyContracts).values({
+        companyId: input.companyId,
         url,
         fileKey,
         filename: input.filename,
@@ -78,8 +78,8 @@ export const contractsRouter = router({
       });
       const [contract] = await db
         .select()
-        .from(sponsorContracts)
-        .where(eq(sponsorContracts.id, result.insertId))
+        .from(companyContracts)
+        .where(eq(companyContracts.id, result.insertId))
         .limit(1);
       const { extractedText: _extractedText, ...rest } = contract;
       return { ...rest, hasExtractedText: !!contract.extractedText };
@@ -98,11 +98,11 @@ export const contractsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { id, ...rest } = input;
       await assertContractInClub(id, ctx.user.clubId!);
-      await db.update(sponsorContracts).set(rest).where(eq(sponsorContracts.id, id));
+      await db.update(companyContracts).set(rest).where(eq(companyContracts.id, id));
       const [contract] = await db
         .select()
-        .from(sponsorContracts)
-        .where(eq(sponsorContracts.id, id))
+        .from(companyContracts)
+        .where(eq(companyContracts.id, id))
         .limit(1);
       const { extractedText: _extractedText, ...contractRest } = contract;
       return contractRest;
@@ -113,7 +113,8 @@ export const contractsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const contract = await assertContractInClub(input.id, ctx.user.clubId!);
       await db.delete(contractPayments).where(eq(contractPayments.contractId, contract.id));
-      await db.delete(sponsorContracts).where(eq(sponsorContracts.id, input.id));
+      await db.update(assets).set({ contractId: null }).where(eq(assets.contractId, contract.id));
+      await db.delete(companyContracts).where(eq(companyContracts.id, input.id));
       return { success: true };
     }),
 
@@ -121,28 +122,28 @@ export const contractsRouter = router({
   expiringSoon: protectedProcedure.query(async ({ ctx }) => {
     const clubId = ctx.user.clubId;
     if (!clubId) return [];
-    const clubSponsors = await db.select().from(sponsors).where(eq(sponsors.clubId, clubId));
-    const sponsorIds = clubSponsors.map((s) => s.id);
-    if (sponsorIds.length === 0) return [];
+    const clubCompanies = await db.select().from(companies).where(eq(companies.clubId, clubId));
+    const companyIds = clubCompanies.map((c) => c.id);
+    if (companyIds.length === 0) return [];
 
     const now = new Date();
     const horizon = new Date(now.getTime() + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000);
 
     const contracts = await db
       .select()
-      .from(sponsorContracts)
+      .from(companyContracts)
       .where(
         and(
-          inArray(sponsorContracts.sponsorId, sponsorIds),
-          gte(sponsorContracts.endDate, now),
-          lte(sponsorContracts.endDate, horizon),
+          inArray(companyContracts.companyId, companyIds),
+          gte(companyContracts.endDate, now),
+          lte(companyContracts.endDate, horizon),
         ),
       )
-      .orderBy(asc(sponsorContracts.endDate));
+      .orderBy(asc(companyContracts.endDate));
 
     return contracts.map(({ extractedText: _extractedText, ...contract }) => ({
       ...contract,
-      sponsor: clubSponsors.find((s) => s.id === contract.sponsorId)!,
+      company: clubCompanies.find((c) => c.id === contract.companyId)!,
     }));
   }),
 

@@ -4,111 +4,73 @@ import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { router, protectedProcedure, adminProcedure, publicProcedure } from "../trpc";
 import { db } from "../../db";
-import {
-  acceptanceRecords,
-  benefitCheckItems,
-  benefitItems,
-  matches,
-  reportShareTokens,
-  reports,
-  sponsors,
-  users,
-} from "../../db/schema";
+import { assets, companies, deliveries, matches, reportShareTokens, reports, users } from "../../db/schema";
 import { invokeLLM } from "../../lib/llm";
 
-const FULFILLMENT_MODE_LABELS: Record<string, string> = {
-  QUANTITY: "数量累计型",
-  MATCH: "逐场型",
-  ROUND: "逐轮型",
-  EVENT: "活动次数型",
-  ONE_TIME: "一次性",
-  CONTINUOUS: "持续型",
-};
-
-const FULFILLED_LABELS: Record<string, string> = {
-  yes: "已履约",
-  no: "未履约",
-  partial: "部分履约",
-  na: "不适用",
-};
-
-async function assertSponsorInClub(sponsorId: number, clubId: number) {
-  const [sponsor] = await db
+async function assertCompanyInClub(companyId: number, clubId: number) {
+  const [company] = await db
     .select()
-    .from(sponsors)
-    .where(and(eq(sponsors.id, sponsorId), eq(sponsors.clubId, clubId)))
+    .from(companies)
+    .where(and(eq(companies.id, companyId), eq(companies.clubId, clubId)))
     .limit(1);
-  if (!sponsor) throw new TRPCError({ code: "NOT_FOUND", message: "赞助商不存在" });
-  return sponsor;
+  if (!company) throw new TRPCError({ code: "NOT_FOUND", message: "赞助商不存在" });
+  return company;
 }
 
-async function buildSponsorPrompt(sponsorId: number, clubId: number) {
-  const sponsor = await assertSponsorInClub(sponsorId, clubId);
-  const items = await db.select().from(benefitItems).where(eq(benefitItems.sponsorId, sponsorId));
-  const clubMatches = await db
-    .select()
-    .from(matches)
-    .where(eq(matches.clubId, clubId))
-    .orderBy(asc(matches.round));
-  const records = await db
-    .select()
-    .from(acceptanceRecords)
-    .where(eq(acceptanceRecords.sponsorId, sponsorId));
-  const recordIds = records.map((r) => r.id);
-  const checkItems =
-    recordIds.length > 0
-      ? await db.select().from(benefitCheckItems).where(inArray(benefitCheckItems.recordId, recordIds))
-      : [];
+async function buildCompanyPrompt(companyId: number, clubId: number) {
+  const company = await assertCompanyInClub(companyId, clubId);
+  const companyAssets = await db.select().from(assets).where(eq(assets.companyId, companyId));
+  const assetIds = companyAssets.map((a) => a.id);
+  const assetDeliveries =
+    assetIds.length > 0 ? await db.select().from(deliveries).where(inArray(deliveries.assetId, assetIds)) : [];
+  const matchIds = [...new Set(assetDeliveries.map((d) => d.matchId).filter((id): id is number => id != null))];
+  const matchRows = matchIds.length > 0 ? await db.select().from(matches).where(inArray(matches.id, matchIds)) : [];
 
-  const completedRecords = records.filter((r) => r.status === "completed");
-  const issueRecords = records.filter((r) => r.status === "issue");
-  const ratings = records.filter((r) => r.overallRating != null).map((r) => r.overallRating!);
-  const avgRating = ratings.length > 0 ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1) : "无";
+  const delivered = assetDeliveries.filter((d) => d.status === "delivered");
+  const issues = assetDeliveries.filter((d) => d.status === "issue");
+  const unscheduled = assetDeliveries.filter((d) => d.status === "unscheduled");
 
-  const itemsSection = items
-    .map(
-      (i) =>
-        `- ${i.name}（${FULFILLMENT_MODE_LABELS[i.fulfillmentMode]}${i.targetCount ? `，目标${i.targetCount}${i.countUnit ?? ""}` : ""}）`,
-    )
+  const assetsSection = companyAssets
+    .map((asset) => {
+      const ds = assetDeliveries.filter((d) => d.assetId === asset.id);
+      const doneCount = ds.filter((d) => d.status === "delivered").length;
+      return `- ${asset.name}（${asset.category || "未分类"}${asset.targetCount ? `，目标${asset.targetCount}${asset.countUnit ?? ""}` : ""}）：已完成 ${doneCount}/${ds.length}`;
+    })
     .join("\n");
 
-  const detailSection = clubMatches
-    .map((m) => {
-      const record = records.find((r) => r.matchId === m.id);
-      if (!record) return `第${m.round}轮 vs ${m.opponent}（${m.isHome ? "主场" : "客场"}，${m.matchDate.toISOString().slice(0, 10)}）\n  未填写验收记录`;
-      const recordCheckItems = checkItems.filter((c) => c.recordId === record.id);
-      const itemLines = recordCheckItems
-        .map((c) => {
-          const benefitItem = items.find((bi) => bi.id === c.benefitItemId);
-          const benefitName = benefitItem?.name ?? "未知权益";
-          return `  - ${benefitName}: ${FULFILLED_LABELS[c.fulfilled]}${c.note ? `（${c.note}）` : ""}`;
-        })
-        .join("\n");
-      return `第${m.round}轮 vs ${m.opponent}（${m.isHome ? "主场" : "客场"}，${m.matchDate.toISOString().slice(0, 10)}）\n  整体状态：${record.status}\n  评分：${record.overallRating ?? "无"}\n  备注：${record.summary ?? "无"}\n${itemLines}`;
+  const detailSection = assetDeliveries
+    .map((d) => {
+      const asset = companyAssets.find((a) => a.id === d.assetId);
+      const match = d.matchId ? matchRows.find((m) => m.id === d.matchId) : null;
+      const when = match
+        ? `第${match.round}轮 vs ${match.opponent}（${match.matchDate.toISOString().slice(0, 10)}）`
+        : d.scheduledDate
+          ? d.scheduledDate.toISOString().slice(0, 10)
+          : "未排期";
+      return `- ${asset?.name ?? "未知资产"} | ${when} | 状态：${d.status}${d.note ? `｜备注：${d.note}` : ""}`;
     })
-    .join("\n\n");
+    .join("\n");
 
-  return `你是一名专业的体育赞助商权益验收分析师。请根据以下数据，为赞助商生成一份详细的权益验收报告。
+  return `你是一名专业的体育赞助商权益履约分析师。请根据以下数据，为赞助商生成一份详细的权益履约报告。
 
 ## 赞助商基本信息
-- 赞助商名称：${sponsor.name}
-- 赞助层级：${sponsor.tier}
-- 备注：${sponsor.notes ?? "无"}
+- 名称：${company.name}
+- 层级：${company.tier}
+- 备注：${company.notes ?? "无"}
 
-## 权益条目列表（共${items.length}条）
-${itemsSection}
+## 资产（权益）列表（共${companyAssets.length}项）
+${assetsSection}
 
-## 验收数据统计
-- 总场次：${clubMatches.length}场
-- 已填写验收记录：${records.length}场
-- 已完成验收：${completedRecords.length}场
-- 存在问题：${issueRecords.length}场
-- 平均评分：${avgRating}分
+## 履约数据统计
+- 交付总数：${assetDeliveries.length}
+- 已完成：${delivered.length}
+- 存在问题：${issues.length}
+- 未排期：${unscheduled.length}
 
-## 各场次验收详情
+## 各交付明细
 ${detailSection}
 
-请生成一份专业的权益验收报告，包含：
+请生成一份专业的权益履约报告，包含：
 1. 执行摘要
 2. 数据统计（表格）
 3. 权益履约分析（逐类分析）
@@ -119,31 +81,34 @@ ${detailSection}
 }
 
 async function buildSeasonPrompt(clubId: number) {
-  const clubSponsors = await db.select().from(sponsors).where(eq(sponsors.clubId, clubId));
-  const clubMatches = await db.select().from(matches).where(eq(matches.clubId, clubId));
-  const matchIds = clubMatches.map((m) => m.id);
-  const records =
-    matchIds.length > 0
-      ? await db.select().from(acceptanceRecords).where(inArray(acceptanceRecords.matchId, matchIds))
-      : [];
+  const clubCompanies = await db
+    .select()
+    .from(companies)
+    .where(and(eq(companies.clubId, clubId), eq(companies.stage, "signed")));
+  const companyIds = clubCompanies.map((c) => c.id);
+  const clubAssets =
+    companyIds.length > 0 ? await db.select().from(assets).where(inArray(assets.companyId, companyIds)) : [];
+  const assetIds = clubAssets.map((a) => a.id);
+  const allDeliveries =
+    assetIds.length > 0 ? await db.select().from(deliveries).where(inArray(deliveries.assetId, assetIds)) : [];
 
-  const summaryLines = clubSponsors
-    .map((sponsor) => {
-      const sponsorRecords = records.filter((r) => r.sponsorId === sponsor.id);
-      const completed = sponsorRecords.filter((r) => r.status === "completed").length;
-      const issues = sponsorRecords.filter((r) => r.status === "issue").length;
-      return `| ${sponsor.name} | ${sponsor.tier} | ${sponsorRecords.length}/${clubMatches.length} | ${completed} | ${issues} |`;
+  const summaryLines = clubCompanies
+    .map((company) => {
+      const companyAssetIds = clubAssets.filter((a) => a.companyId === company.id).map((a) => a.id);
+      const ds = allDeliveries.filter((d) => companyAssetIds.includes(d.assetId));
+      const completed = ds.filter((d) => d.status === "delivered").length;
+      const issues = ds.filter((d) => d.status === "issue").length;
+      return `| ${company.name} | ${company.tier} | ${ds.length} | ${completed} | ${issues} |`;
     })
     .join("\n");
 
-  return `你是一名专业的体育赞助商权益验收分析师。请根据以下数据，生成本赛季全体赞助商权益验收总结报告。
+  return `你是一名专业的体育赞助商权益履约分析师。请根据以下数据，生成本赛季全体赞助商权益履约总结报告。
 
 ## 赛季概况
-- 总场次：${clubMatches.length}场
-- 赞助商数量：${clubSponsors.length}家
+- 赞助商数量：${clubCompanies.length}家
 
 ## 各赞助商履约汇总
-| 赞助商 | 层级 | 已验收/总场次 | 已完成 | 存在问题 |
+| 赞助商 | 层级 | 交付总数 | 已完成 | 存在问题 |
 |---|---|---|---|---|
 ${summaryLines}
 
@@ -157,19 +122,18 @@ ${summaryLines}
 }
 
 export const reportsRouter = router({
-  bySponsor: protectedProcedure
-    .input(z.object({ sponsorId: z.number() }))
+  byCompany: protectedProcedure
+    .input(z.object({ companyId: z.number() }))
     .query(async ({ ctx, input }) => {
-      await assertSponsorInClub(input.sponsorId, ctx.user.clubId!);
+      await assertCompanyInClub(input.companyId, ctx.user.clubId!);
       return db
         .select()
         .from(reports)
-        .where(and(eq(reports.type, "sponsor"), eq(reports.sponsorId, input.sponsorId)))
+        .where(and(eq(reports.type, "company"), eq(reports.companyId, input.companyId)))
         .orderBy(desc(reports.createdAt));
     }),
 
   season: protectedProcedure.query(async ({ ctx }) => {
-    // Season reports have no clubId column, so scope them by which club their generatingBy user belongs to.
     const clubUsers = await db.select().from(users).where(eq(users.clubId, ctx.user.clubId!));
     const clubUserIds = clubUsers.map((u) => u.id);
     if (clubUserIds.length === 0) return [];
@@ -180,14 +144,14 @@ export const reportsRouter = router({
       .orderBy(desc(reports.createdAt));
   }),
 
-  generateSponsor: protectedProcedure
-    .input(z.object({ sponsorId: z.number() }))
+  generateCompany: protectedProcedure
+    .input(z.object({ companyId: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const prompt = await buildSponsorPrompt(input.sponsorId, ctx.user.clubId!);
+      const prompt = await buildCompanyPrompt(input.companyId, ctx.user.clubId!);
       const content = await invokeLLM(prompt);
       const [result] = await db.insert(reports).values({
-        type: "sponsor",
-        sponsorId: input.sponsorId,
+        type: "company",
+        companyId: input.companyId,
         content,
         generatedBy: ctx.user.id,
       });
@@ -210,20 +174,20 @@ export const reportsRouter = router({
   createShareLink: adminProcedure
     .input(
       z.object({
-        sponsorId: z.number(),
+        companyId: z.number(),
         reportId: z.number().optional(),
         expiresInDays: z.number().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await assertSponsorInClub(input.sponsorId, ctx.user.clubId!);
+      await assertCompanyInClub(input.companyId, ctx.user.clubId!);
       const token = nanoid(32);
       const expiresAt = input.expiresInDays
         ? new Date(Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000)
         : null;
       await db.insert(reportShareTokens).values({
         token,
-        sponsorId: input.sponsorId,
+        companyId: input.companyId,
         reportId: input.reportId,
         createdBy: ctx.user.id,
         expiresAt,
@@ -237,13 +201,13 @@ export const reportsRouter = router({
     }),
 
   listShareLinks: adminProcedure
-    .input(z.object({ sponsorId: z.number() }))
+    .input(z.object({ companyId: z.number() }))
     .query(async ({ ctx, input }) => {
-      await assertSponsorInClub(input.sponsorId, ctx.user.clubId!);
+      await assertCompanyInClub(input.companyId, ctx.user.clubId!);
       return db
         .select()
         .from(reportShareTokens)
-        .where(eq(reportShareTokens.sponsorId, input.sponsorId))
+        .where(eq(reportShareTokens.companyId, input.companyId))
         .orderBy(desc(reportShareTokens.createdAt));
     }),
 
@@ -256,7 +220,7 @@ export const reportsRouter = router({
         .where(eq(reportShareTokens.id, input.id))
         .limit(1);
       if (!link) throw new TRPCError({ code: "NOT_FOUND" });
-      await assertSponsorInClub(link.sponsorId, ctx.user.clubId!);
+      await assertCompanyInClub(link.companyId, ctx.user.clubId!);
       await db.delete(reportShareTokens).where(eq(reportShareTokens.id, input.id));
       return { success: true };
     }),
@@ -272,24 +236,15 @@ export const reportsRouter = router({
       throw new TRPCError({ code: "FORBIDDEN", message: "链接已过期" });
     }
 
-    const [sponsor] = await db.select().from(sponsors).where(eq(sponsors.id, link.sponsorId)).limit(1);
-    if (!sponsor) throw new TRPCError({ code: "NOT_FOUND" });
+    const [company] = await db.select().from(companies).where(eq(companies.id, link.companyId)).limit(1);
+    if (!company) throw new TRPCError({ code: "NOT_FOUND" });
 
-    const items = await db.select().from(benefitItems).where(eq(benefitItems.sponsorId, sponsor.id));
-    const clubMatches = await db
-      .select()
-      .from(matches)
-      .where(eq(matches.clubId, sponsor.clubId))
-      .orderBy(asc(matches.round));
-    const records = await db
-      .select()
-      .from(acceptanceRecords)
-      .where(eq(acceptanceRecords.sponsorId, sponsor.id));
-    const recordIds = records.map((r) => r.id);
-    const checkItems =
-      recordIds.length > 0
-        ? await db.select().from(benefitCheckItems).where(inArray(benefitCheckItems.recordId, recordIds))
-        : [];
+    const companyAssets = await db.select().from(assets).where(eq(assets.companyId, company.id));
+    const assetIds = companyAssets.map((a) => a.id);
+    const assetDeliveries =
+      assetIds.length > 0 ? await db.select().from(deliveries).where(inArray(deliveries.assetId, assetIds)) : [];
+    const matchIds = [...new Set(assetDeliveries.map((d) => d.matchId).filter((id): id is number => id != null))];
+    const matchRows = matchIds.length > 0 ? await db.select().from(matches).where(inArray(matches.id, matchIds)) : [];
 
     let report = null;
     if (link.reportId) {
@@ -298,14 +253,17 @@ export const reportsRouter = router({
     }
 
     return {
-      sponsor,
+      company,
       report,
       generatedAt: link.createdAt,
-      benefitItems: items,
-      matches: clubMatches.map((match) => ({
-        match,
-        record: records.find((r) => r.matchId === match.id) ?? null,
-        checkItems: checkItems.filter((c) => records.find((r) => r.matchId === match.id)?.id === c.recordId),
+      assets: companyAssets.map((asset) => ({
+        asset,
+        deliveries: assetDeliveries
+          .filter((d) => d.assetId === asset.id)
+          .map((delivery) => ({
+            delivery,
+            match: delivery.matchId ? (matchRows.find((m) => m.id === delivery.matchId) ?? null) : null,
+          })),
       })),
     };
   }),

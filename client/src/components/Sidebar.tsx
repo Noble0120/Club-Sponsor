@@ -3,14 +3,12 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard,
   CalendarDays,
-  Trophy,
-  ListChecks,
+  GanttChartSquare,
   CheckSquare,
   Settings,
   Users,
   FileText,
-  GitBranch,
-  BarChart3,
+  Trophy,
   ChevronsLeft,
   ChevronsRight,
   LogOut,
@@ -33,19 +31,15 @@ type NavItem = {
 
 const MAIN_NAV: NavItem[] = [
   { label: "总览", path: "/", icon: LayoutDashboard },
-  { label: "按轮次查看", path: "/by-round", icon: CalendarDays },
-  { label: "按赞助商查看", path: "/by-sponsor", icon: Trophy },
-  { label: "按权益查看", path: "/by-benefit", icon: ListChecks },
-  { label: "我的待办", path: "/my-tasks", icon: CheckSquare },
+  { label: "排期", path: "/planning", icon: GanttChartSquare },
+  { label: "任务看板", path: "/tasks", icon: CheckSquare },
 ];
 
 const ADMIN_NAV: NavItem[] = [
-  { label: "赞助商管理", path: "/sponsors-admin", icon: Settings },
+  { label: "赞助商管理", path: "/companies-admin", icon: Settings },
   { label: "赛程管理", path: "/matches-admin", icon: CalendarDays },
   { label: "用户管理", path: "/user-management", icon: Users },
-  { label: "验收报告", path: "/reports", icon: FileText },
-  { label: "工作流管理", path: "/workflow", icon: GitBranch },
-  { label: "SOP 模板配置", path: "/workflow/templates", icon: BarChart3 },
+  { label: "履约报告", path: "/reports", icon: FileText },
 ];
 
 const WIDTH_KEY = "sidebar-width";

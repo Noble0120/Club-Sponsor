@@ -4,17 +4,12 @@ import { useAuth } from "@/hooks/useAuth";
 import Login from "@/pages/Login";
 import SponsorReport from "@/pages/SponsorReport";
 import Home from "@/pages/Home";
-import ByRound from "@/pages/ByRound";
-import BySponsor from "@/pages/BySponsor";
-import ByBenefit from "@/pages/ByBenefit";
-import SponsorDetail from "@/pages/SponsorDetail";
-import AcceptanceForm from "@/pages/AcceptanceForm";
-import MyTasks from "@/pages/MyTasks";
-import SponsorsAdmin from "@/pages/SponsorsAdmin";
+import Planning from "@/pages/Planning";
+import Tasks from "@/pages/Tasks";
+import CompanyDetail from "@/pages/CompanyDetail";
+import CompaniesAdmin from "@/pages/CompaniesAdmin";
 import UserManagement from "@/pages/UserManagement";
 import Reports from "@/pages/Reports";
-import WorkflowTemplates from "@/pages/WorkflowTemplates";
-import WorkflowOverview from "@/pages/WorkflowOverview";
 import MatchesAdmin from "@/pages/MatchesAdmin";
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
@@ -36,40 +31,25 @@ export default function App() {
           <Home />
         </DashboardLayout>
       </Route>
-      <Route path="/by-round">
+      <Route path="/planning">
         <DashboardLayout>
-          <ByRound />
+          <Planning />
         </DashboardLayout>
       </Route>
-      <Route path="/by-sponsor">
+      <Route path="/tasks">
         <DashboardLayout>
-          <BySponsor />
+          <Tasks />
         </DashboardLayout>
       </Route>
-      <Route path="/by-benefit">
+      <Route path="/company/:id">
         <DashboardLayout>
-          <ByBenefit />
+          <CompanyDetail />
         </DashboardLayout>
       </Route>
-      <Route path="/sponsor/:id">
-        <DashboardLayout>
-          <SponsorDetail />
-        </DashboardLayout>
-      </Route>
-      <Route path="/acceptance/:matchId/:sponsorId">
-        <DashboardLayout>
-          <AcceptanceForm />
-        </DashboardLayout>
-      </Route>
-      <Route path="/my-tasks">
-        <DashboardLayout>
-          <MyTasks />
-        </DashboardLayout>
-      </Route>
-      <Route path="/sponsors-admin">
+      <Route path="/companies-admin">
         <DashboardLayout>
           <AdminRoute>
-            <SponsorsAdmin />
+            <CompaniesAdmin />
           </AdminRoute>
         </DashboardLayout>
       </Route>
@@ -91,20 +71,6 @@ export default function App() {
         <DashboardLayout>
           <AdminRoute>
             <Reports />
-          </AdminRoute>
-        </DashboardLayout>
-      </Route>
-      <Route path="/workflow/templates">
-        <DashboardLayout>
-          <AdminRoute>
-            <WorkflowTemplates />
-          </AdminRoute>
-        </DashboardLayout>
-      </Route>
-      <Route path="/workflow">
-        <DashboardLayout>
-          <AdminRoute>
-            <WorkflowOverview />
           </AdminRoute>
         </DashboardLayout>
       </Route>
